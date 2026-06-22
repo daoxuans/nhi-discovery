@@ -29,14 +29,34 @@ async def lifespan(app: FastAPI):
     db.upsert_session(settings.session_id, "running")
     app.state.db = db
 
-    # Probe consumer (Phase 2 启动；Phase 1 留空)
-    app.state.db_writer = None
-    app.state.ai_writer = None
-    app.state.consumer = None
-    # Scan scheduler (Phase 4 启动；Phase 1 留空)
+    # ── Probe: DbWriter + AiWriter + EventConsumer ──
+    from app.probe.db_writer import DbWriter
+    from app.probe.ai_writer import AiWriter
+    from app.probe.event_consumer import EventConsumer
+
+    db_writer = DbWriter(
+        settings.session_id, db,
+        batch_interval=settings.db_writer_batch_interval,
+        batch_size=settings.db_writer_batch_size,
+    )
+    db_writer.start()
+    app.state.db_writer = db_writer
+
+    ai_writer = AiWriter(db)
+    app.state.ai_writer = ai_writer
+
+    consumer = EventConsumer(
+        db, db_writer, ai_writer,
+        socket_path=settings.distributor_socket,
+        ndpisrvd_py=settings.ndpisrvd_py,
+    )
+    consumer.start()
+    app.state.consumer = consumer
+
+    # ── Scan scheduler (Phase 4 启动；Phase 2/3 留空) ──
     app.state.scan_scheduler = None
 
-    logger.info("NHI Discovery ready (Phase 1: fusion layer only)")
+    logger.info("NHI Discovery ready (Probe consumer connected)")
     yield
 
     logger.info("NHI Discovery shutting down ...")
@@ -52,7 +72,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NHI Discovery",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -77,12 +97,17 @@ app.include_router(assets.router)
 async def health():
     db = app.state.db
     counts = db.table_counts()
+    consumer = getattr(app.state, "consumer", None)
+    db_writer = getattr(app.state, "db_writer", None)
     return {
         "status": "ok",
         "db_path": settings.db_path,
         "db_size_bytes": db.db_file_size(),
         "tables": counts,
         "distributor_socket": settings.distributor_socket,
-        "probe_consumer": "running" if app.state.consumer else "stopped",
-        "scan_scheduler": "running" if app.state.scan_scheduler else "stopped",
+        "probe_consumer": "running" if consumer and consumer._running else "stopped",
+        "probe_last_event_at": consumer.last_event_at if consumer else None,
+        "probe_event_count": consumer._event_count if consumer else 0,
+        "db_writer_queue_depth": db_writer.queue_depth if db_writer else 0,
+        "scan_scheduler": "running" if getattr(app.state, "scan_scheduler", None) else "stopped",
     }

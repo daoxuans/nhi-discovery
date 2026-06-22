@@ -438,18 +438,18 @@ class Database:
     # ──────────────── ai_events (Probe Layer1/2 流水) ────────────────
 
     def insert_ai_event(self, e: Dict) -> int:
-        sql = """INSERT INTO ai_events
-            (flow_id, src_ip, dst_ip, src_port, dst_port, l4_proto,
-             proto, proto_id, hostname, confidence,
-             ai_vendor, ai_service, ai_svc_type, ai_color,
-             ai_agent, ai_agent_vendor, ai_agent_score,
-             ja4, ja3, user_agent,
-             mcp_method, mcp_tool_name,
-             ollama_action, ollama_model,
-             vllm_action, vllm_model,
-             triton_endpoint, triton_model,
-             event_type, first_seen_usec)
-            VALUES (?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?, ?,?, ?,?, ?,?, ?,?)"""
+        cols = ["flow_id", "src_ip", "dst_ip", "src_port", "dst_port", "l4_proto",
+                "proto", "proto_id", "hostname", "confidence",
+                "ai_vendor", "ai_service", "ai_svc_type", "ai_color",
+                "ai_agent", "ai_agent_vendor", "ai_agent_score",
+                "ja4", "ja3", "user_agent",
+                "mcp_method", "mcp_tool_name",
+                "ollama_action", "ollama_model",
+                "vllm_action", "vllm_model",
+                "triton_endpoint", "triton_model",
+                "event_type", "first_seen_usec"]
+        placeholders = ",".join(["?"] * len(cols))
+        sql = f"INSERT INTO ai_events ({','.join(cols)}) VALUES ({placeholders})"
         params = (
             e.get("flow_id"), e.get("src_ip"), e.get("dst_ip"),
             e.get("src_port"), e.get("dst_port"), e.get("l4_proto"),
