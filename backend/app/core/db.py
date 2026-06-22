@@ -729,12 +729,12 @@ class Database:
     def insert_scan_findings_batch(self, findings: List[Dict]) -> int:
         if not findings:
             return 0
-        sql = """INSERT INTO scan_findings
-            (task_id, ip, port, proto, state, service_raw, banner,
-             api_path, api_status, api_response, models_detected, version_detected,
-             favicon_hash, html_features, platform_guess,
-             ai_vendor, ai_service, ai_svc_type, confidence, found_at)
-            VALUES (?,?,?,?,?,?, ?,?,?,?,?,?, ?,?, ?,?,?,?, ?)"""
+        cols = ["task_id", "ip", "port", "proto", "state", "service_raw", "banner",
+                "api_path", "api_status", "api_response", "models_detected", "version_detected",
+                "favicon_hash", "html_features", "platform_guess",
+                "ai_vendor", "ai_service", "ai_svc_type", "confidence", "found_at"]
+        placeholders = ",".join(["?"] * len(cols))
+        sql = f"INSERT INTO scan_findings ({','.join(cols)}) VALUES ({placeholders})"
         tuples = []
         now = now_cst()
         for f in findings:

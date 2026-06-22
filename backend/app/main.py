@@ -29,6 +29,12 @@ async def lifespan(app: FastAPI):
     db.upsert_session(settings.session_id, "running")
     app.state.db = db
 
+    # ── 种子数据：Scan targets + CVE ──
+    from app.scan.target_manager import seed_if_empty
+    from app.scan.cve_updater import seed_initial_cves
+    seed_if_empty(db)
+    seed_initial_cves(db)
+
     # ── Probe: DbWriter + AiWriter + EventConsumer ──
     from app.probe.db_writer import DbWriter
     from app.probe.ai_writer import AiWriter
@@ -53,10 +59,10 @@ async def lifespan(app: FastAPI):
     consumer.start()
     app.state.consumer = consumer
 
-    # ── Scan scheduler (Phase 4 启动；Phase 2/3 留空) ──
+    # ── Scan scheduler (Phase 4 启动) ──
     app.state.scan_scheduler = None
 
-    logger.info("NHI Discovery ready (Probe consumer connected)")
+    logger.info("NHI Discovery ready (Probe + Scan)")
     yield
 
     logger.info("NHI Discovery shutting down ...")
@@ -72,7 +78,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NHI Discovery",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
