@@ -59,8 +59,15 @@ async def lifespan(app: FastAPI):
     consumer.start()
     app.state.consumer = consumer
 
-    # ── Scan scheduler (Phase 4 启动) ──
-    app.state.scan_scheduler = None
+    # ── Scan scheduler ──
+    if settings.scan_scheduler_enabled:
+        from app.scan.scheduler import ScanScheduler
+        scan_scheduler = ScanScheduler(db)
+        scan_scheduler.start()
+        app.state.scan_scheduler = scan_scheduler
+    else:
+        app.state.scan_scheduler = None
+        logger.info("ScanScheduler disabled (SCAN_SCHEDULER_ENABLED=0)")
 
     logger.info("NHI Discovery ready (Probe + Scan)")
     yield

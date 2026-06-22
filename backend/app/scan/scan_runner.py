@@ -208,6 +208,15 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
         )
         logger.info(f"scan task {task_id} done: {len(scan_findings)} findings, "
                     f"{len(ai_service_upserts)} AI services")
+
+        # ── 双源融合 ──
+        try:
+            from app.scan.result_correlator import correlate_scan_results
+            result = correlate_scan_results(db, task_id)
+            logger.info(f"scan task {task_id} fusion: {result}")
+        except Exception as e:
+            logger.error(f"correlate failed for task {task_id}: {e}", exc_info=True)
+
         return task_id
 
     except Exception as e:
