@@ -513,8 +513,14 @@ class Database:
             with self._lock:
                 return {r["name"]: r["count"] for r in self._conn.execute(sql).fetchall()}
 
+        # percentage 口径修正：只用"确认的 AI 事件"（ai_vendor 非 NULL）算占比，
+        # 避免路径B去门控后大量未命中规则的 detected 事件虚高占比
         with self._lock:
             total = self._conn.execute(f"SELECT COUNT(*) FROM ai_events{cond}").fetchone()[0]
+            confirmed = self._conn.execute(
+                f"SELECT COUNT(*) FROM ai_events{cond} "
+                f"{'AND' if cond else 'WHERE'} ai_vendor IS NOT NULL"
+            ).fetchone()[0]
             flows_total = self._conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
             top_ja4 = [dict(r) for r in self._conn.execute(
                 f"SELECT ja4, COUNT(*) as count FROM ai_events {cond} {joiner if cond else ''} "
@@ -524,9 +530,12 @@ class Database:
                 f"SELECT hostname, COUNT(*) as count FROM ai_events {cond} {joiner if cond else ''} "
                 f"hostname IS NOT NULL AND hostname != '' GROUP BY hostname ORDER BY count DESC LIMIT 10"
             ).fetchall()]
-        percentage = round(total / flows_total * 100, 2) if flows_total else 0.0
+        percentage = round(confirmed / flows_total * 100, 2) if flows_total else 0.0
         return {
-            "total": total, "percentage": percentage,
+            "total": total,
+            "confirmed": confirmed,
+            "percentage": percentage,
+            "percentage_note": "confirmed(ai_vendor非空) / flows",
             "vendor_counts": _grp("ai_vendor"),
             "service_counts": _grp("ai_service"),
             "agent_counts": _grp("ai_agent"),

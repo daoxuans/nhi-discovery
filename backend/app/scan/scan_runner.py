@@ -108,7 +108,8 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
 
                     if pf.port in PORT_API_MAP:
                         api_finding = await probe_api(session, pf.ip, pf.port, api_timeout)
-                        if api_finding and api_finding.vendor:
+                        if api_finding:
+                            # 始终记录探测结果（审计用），但 ai_vendor 仅在确认时填
                             finding_dict.update({
                                 "api_path": api_finding.api_path,
                                 "api_status": api_finding.api_status,
@@ -120,7 +121,10 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
                                 "ai_svc_type": api_finding.svc_type,
                                 "confidence": api_finding.confidence,
                             })
-                            if api_finding.confidence >= 0.6 and api_finding.service:
+                            # 仅高置信度（有模型或健康检查通过）才进 ai_services
+                            if (api_finding.confidence >= 0.6
+                                    and api_finding.vendor
+                                    and api_finding.service):
                                 ai_service_upserts.append({
                                     "ip": pf.ip, "port": pf.port,
                                     "vendor": api_finding.vendor,

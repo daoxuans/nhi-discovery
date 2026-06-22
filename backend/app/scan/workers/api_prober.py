@@ -100,14 +100,15 @@ async def probe_api(session: aiohttp.ClientSession, ip: str, port: int,
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
             status = resp.status
             text = await resp.text()
+            # 非 200：端口开放但不是该 AI 框架（撞库），不标 ai_vendor
             if status != 200:
                 return ApiFinding(
                     ip=ip, port=port, api_path=api_path,
                     api_status=status, api_response=text[:200],
-                    vendor=default_vendor, service=default_service, svc_type=default_svc_type,
-                    confidence=0.3,
+                    vendor=None, service=None, svc_type=None,
+                    confidence=0.1,  # 仅表示"探测过但未确认"
                 )
-            # 健康检查类
+            # 健康检查类（Triton /v2/health/ready 200 即确认）
             if port in HEALTH_CHECK_PORTS:
                 return ApiFinding(
                     ip=ip, port=port, api_path=api_path,
@@ -120,21 +121,28 @@ async def probe_api(session: aiohttp.ClientSession, ip: str, port: int,
             try:
                 data = _json.loads(text)
             except Exception:
+                # 200 但非 JSON：可能是普通 Web 服务撞了 AI 端口，不标 ai_vendor
                 return ApiFinding(
                     ip=ip, port=port, api_path=api_path,
                     api_status=status, api_response=text[:200],
-                    vendor=default_vendor, service=default_service, svc_type=default_svc_type,
-                    confidence=0.4,
+                    vendor=None, service=None, svc_type=None,
+                    confidence=0.15,
                 )
             models = _parse_models(data, port)
             version = _extract_version(resp.headers, data, port)
-            # 模型存在则高置信度
-            conf = 0.9 if models else 0.6
+            # 有模型列表 → 高置信度确认；无模型但 200+JSON → 中置信度（可能空模型库）
+            if models:
+                conf = 0.9
+                vendor, service, svc_type = default_vendor, default_service, default_svc_type
+            else:
+                # 200 + 合法 JSON 但无模型：弱确认（如 Ollama 空库），仍标 vendor 但低置信
+                conf = 0.5
+                vendor, service, svc_type = default_vendor, default_service, default_svc_type
             return ApiFinding(
                 ip=ip, port=port, api_path=api_path,
                 api_status=status, api_response=text[:200],
                 models_detected=models, version_detected=version,
-                vendor=default_vendor, service=default_service, svc_type=default_svc_type,
+                vendor=vendor, service=service, svc_type=svc_type,
                 confidence=conf,
             )
     except asyncio.TimeoutError:

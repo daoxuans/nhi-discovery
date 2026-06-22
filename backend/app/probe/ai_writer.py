@@ -28,6 +28,56 @@ def _get_nested(ndpi: dict, *keys, default=None):
     return v if v is not None else default
 
 
+# Agent 名 → 默认 svc_type 映射（当 service 未识别时兜底分类）
+_AGENT_CATEGORY_FALLBACK = {
+    "Claude Code": "AI_Coding",
+    "Codex CLI": "AI_Coding",
+    "Cursor": "AI_Coding",
+    "GitHub Copilot": "AI_Coding",
+    "Qoder": "AI_Coding",
+    "Trae": "AI_Coding",
+    "CodeBuddy": "AI_Coding",
+    "Lingma": "AI_Coding",
+    "Windsurf": "AI_Coding",
+    "Cline": "AI_Coding",
+    "Claude Web": "LLM_Web",
+    "Claude Client": "LLM_API",
+    "ChatGPT Web": "LLM_Web",
+    "OpenAI Client": "LLM_API",
+    "DeepSeek Client": "LLM_API",
+    "DeepSeek Chat Web": "LLM_Web",
+    "Ollama Client": "LLM_Local",
+    "vLLM Client": "LLM_Local",
+    "Triton Client": "LLM_Local",
+    "MCP Agent": "AI_Protocol",
+    "OpenRouter Client": "LLM_Gateway",
+}
+
+
+def _infer_agent_category(agent_name: str) -> str:
+    """根据 agent 名推断 svc_type（service 未识别时的兜底）。"""
+    if not agent_name:
+        return "Unknown"
+    # 精确匹配
+    if agent_name in _AGENT_CATEGORY_FALLBACK:
+        return _AGENT_CATEGORY_FALLBACK[agent_name]
+    name_lower = agent_name.lower()
+    # 关键词匹配
+    if any(k in name_lower for k in ("code", "cursor", "copilot", "qoder", "trae", "cline", "windsurf", "lingma")):
+        return "AI_Coding"
+    if "web" in name_lower:
+        return "LLM_Web"
+    if any(k in name_lower for k in ("ollama", "vllm", "triton", "llama")):
+        return "LLM_Local"
+    if any(k in name_lower for k in ("gateway", "router", "proxy")):
+        return "LLM_Gateway"
+    if "client" in name_lower:
+        return "LLM_API"
+    if "mcp" in name_lower:
+        return "AI_Protocol"
+    return "Unknown"
+
+
 def _extract_signals(ndpi: dict) -> Dict:
     """从 ndpi 子对象提取 12 种信号 + 基础字段。None/空统一为 None。"""
     tls = ndpi.get("tls") if isinstance(ndpi.get("tls"), dict) else {}
@@ -142,10 +192,12 @@ class AiWriter:
 
             # agent 行：ip=src_ip（仅当识别出 Agent 客户端）
             if agent and src_ip:
+                # category 兜底：svc 优先，否则按 agent 名推断类型
+                agent_category = svc["svc_type"] if svc else _infer_agent_category(agent["agent"])
                 self.db.upsert_ai_endpoint(
                     ip=src_ip, role="agent", name=agent["agent"],
                     vendor=agent["vendor"],
-                    category=svc["svc_type"] if svc else None,
+                    category=agent_category,
                     ja4_append=signals["ja4"],
                     user_agent=signals["user_agent"],
                     source="probe",
