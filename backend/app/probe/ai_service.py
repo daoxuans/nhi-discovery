@@ -106,23 +106,10 @@ AI_SERVICE_RULES: List[Dict] = [
     {"proto": "*", "hostname": "closeai-proxy.com",                "vendor": "CloseAI",     "service": "CloseAI Proxy",     "svc_type": "LLM_Gateway", "color": "#ef4444"},
     {"proto": "*", "hostname": "uniapi.ruijie.com.cn",             "vendor": "Ruijie",      "service": "AI Gateway",        "svc_type": "LLM_Gateway", "color": "#ff5722"},
 
-    # ── Ruijie Enterprise AI Services ─────────────────────────────
-    {"proto": "*", "hostname": "aq.ruijie.com.cn",                 "vendor": "Ruijie",  "service": "AQ Security AI",   "svc_type": "AI_Security",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "sentinel.ruijie.com.cn",           "vendor": "Ruijie",  "service": "Sentinel AI",     "svc_type": "AI_Security",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "learning.ruijie.com.cn",           "vendor": "Ruijie",  "service": "Learning Platform","svc_type": "AI_Edu",       "color": "#ff5722"},
-    {"proto": "*", "hostname": "learning-file.ruijie.com.cn",      "vendor": "Ruijie",  "service": "Learning Files",  "svc_type": "AI_Edu",       "color": "#ff5722"},
-    {"proto": "*", "hostname": "sid.ruijie.com.cn",                "vendor": "Ruijie",  "service": "SID Platform",    "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "dev.sid.ruijie.com.cn",            "vendor": "Ruijie",  "service": "SID Dev",         "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "oa.ruijie.com.cn",                 "vendor": "Ruijie",  "service": "OA Platform",     "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "bugs.ruijie.com.cn",               "vendor": "Ruijie",  "service": "Bug Tracker",     "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "sso.ruijie.com.cn",                "vendor": "Ruijie",  "service": "SSO Gateway",     "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "efa.ruijie.com.cn",                "vendor": "Ruijie",  "service": "EFA Platform",    "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "resource.ruijie.com.cn",           "vendor": "Ruijie",  "service": "Resources",       "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "yfrelease.ruijie.com.cn",          "vendor": "Ruijie",  "service": "YF Release",      "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "web-gw.ruijie.com.cn",             "vendor": "Ruijie",  "service": "Web Gateway",      "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "hcm.ruijie.com.cn",                "vendor": "Ruijie",  "service": "HCM",              "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "ig0011.ruijie.com.cn",             "vendor": "Ruijie",  "service": "IG0011",           "svc_type": "AI_Internal",  "color": "#ff5722"},
-    {"proto": "*", "hostname": "itsm.ruijie.com.cn",               "vendor": "Ruijie",  "service": "ITSM",             "svc_type": "AI_Internal",  "color": "#ff5722"},
+    # 注：Ruijie AQ / Sentinel / Learning / SID / OA / Bugs / SSO / EFA /
+    #     Resource / YF Release / Web Gateway / HCM / IG0011 / ITSM 等
+    #     *.ruijie.com.cn 内部业务平台不属于 AI 相关协议，已从 AI 规则表移除。
+    #     仅 uniapi.ruijie.com.cn（LLM 网关入口）保留为 AI_Gateway。
 ]
 
 

@@ -373,49 +373,10 @@ AGENT_INFERENCE_RULES: List[Dict] = [
         ],
         "min_confidence": 0.30,
     },
-    {
-        "agent": "Ruijie AQ Client",
-        "vendor": "Ruijie",
-        "evidence": [
-            ("hostname", "aq.ruijie.com.cn",                 0.55),
-            ("ja4",      "t13d3113h1_e8f1e7e78f70_1b3407e2c936", 0.55),
-            ("ja4",      "t13d1910h2_9dc949149365_97f8aa674fd9", 0.45),
-            ("ja4",      "t13d1911h2_9dc949149365_e7c285222651", 0.45),
-            ("ja4",      "t13d3013h1_1d37bd780c83_e10b9050f4c9", 0.45),
-            ("ja4",      "t13d4907h2_0d8feac7bc37_7395dae3b2f3", 0.40),
-        ],
-        "min_confidence": 0.30,
-    },
-    {
-        "agent": "Ruijie Learning Client",
-        "vendor": "Ruijie",
-        "evidence": [
-            ("hostname", "learning.ruijie.com.cn",            0.55),
-            ("hostname", "learning-file.ruijie.com.cn",       0.55),
-            ("ja4",      "t13d1516h2_8daaf6152771_d8a2da3f94cd", 0.50),
-        ],
-        "min_confidence": 0.30,
-    },
-    {
-        "agent": "Ruijie Internal Client",
-        "vendor": "Ruijie",
-        "evidence": [
-            ("hostname", "sid.ruijie.com.cn",                 0.55),
-            ("hostname", "dev.sid.ruijie.com.cn",             0.55),
-            ("hostname", "oa.ruijie.com.cn",                  0.55),
-            ("hostname", "sentinel.ruijie.com.cn",            0.50),
-            ("hostname", "bugs.ruijie.com.cn",                0.50),
-            ("hostname", "sso.ruijie.com.cn",                 0.50),
-            ("hostname", "efa.ruijie.com.cn",                 0.50),
-            ("hostname", "resource.ruijie.com.cn",            0.50),
-            ("hostname", "yfrelease.ruijie.com.cn",           0.50),
-            ("hostname", "web-gw.ruijie.com.cn",              0.50),
-            ("hostname", "hcm.ruijie.com.cn",                 0.50),
-            ("hostname", "itsm.ruijie.com.cn",                0.50),
-            ("ja4",      "t13d1516h2_8daaf6152771_d8a2da3f94cd", 0.45),
-        ],
-        "min_confidence": 0.30,
-    },
+    # 注：Ruijie AQ / Learning / Internal Client 等非 AI 内部业务客户端
+    #     已从 Agent 推断规则表移除（aq/sentinel/learning/sid/oa/bugs/sso/
+    #     efa/resource/yfrelease/web-gw/hcm/ig0011/itsm 等非 AI 协议）。
+    #     仅 Ruijie Gateway Client（uniapi.ruijie.com.cn LLM 网关）保留。
 ]
 
 
