@@ -77,8 +77,8 @@ const renderCharts = () => {
       tooltip: { trigger: 'item' },
       legend: { bottom: 0 },
       series: [{ type: 'pie', radius: '65%', top: -20, data: [
-        { name: '已识别', value: det, itemStyle: { color: '#409eff' } },
-        { name: '未识别', value: not, itemStyle: { color: '#dcdfe6' } },
+        { name: '已分类', value: det, itemStyle: { color: '#409eff' } },
+        { name: '待分类', value: not, itemStyle: { color: '#dcdfe6' } },
       ], label: { formatter: '{b}: {d}%' } }],
     })
   }
@@ -108,18 +108,18 @@ onUnmounted(() => {
 <template>
   <div>
     <!-- 概览卡片 -->
-    <el-row :gutter="12" class="mb-16">
+    <el-row :gutter="16" class="mb-16">
       <el-col :span="6">
-        <el-card shadow="hover"><div class="stat-value">{{ stats?.confirmed ?? '-' }}</div><div class="stat-label">AI 事件数 (confirmed)</div></el-card>
+        <el-card shadow="never" class="stat-card"><div class="stat-value">{{ stats?.confirmed ?? '-' }}</div><div class="stat-label">AI 事件数</div></el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover"><div class="stat-value">{{ stats?.percentage != null ? stats.percentage.toFixed(1) : '-' }}%</div><div class="stat-label">AI 流量占比 (AI/flows)</div></el-card>
+        <el-card shadow="never" class="stat-card"><div class="stat-value">{{ stats?.percentage != null ? stats.percentage.toFixed(1) : '-' }}%</div><div class="stat-label">AI 流量占比</div></el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover"><div class="stat-value">{{ flowStats?.total ?? '-' }}</div><div class="stat-label">总流量数 (flows)</div></el-card>
+        <el-card shadow="never" class="stat-card"><div class="stat-value">{{ flowStats?.total ?? '-' }}</div><div class="stat-label">总流量数</div></el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover"><div class="stat-value">{{ Object.keys(stats?.agent_counts || {}).length }}</div><div class="stat-label">识别 Agent 种类</div></el-card>
+        <el-card shadow="never" class="stat-card"><div class="stat-value">{{ Object.keys(stats?.agent_counts || {}).length }}</div><div class="stat-label">识别 Agent 种类</div></el-card>
       </el-col>
     </el-row>
 

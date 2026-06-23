@@ -24,28 +24,36 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 <template>
   <el-container style="height: 100%">
-    <el-aside width="220px" style="background: #304156">
-      <div style="height: 60px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; font-weight: 700;">
-        NHI 资产发现
+    <el-aside width="216px" class="nhi-sidebar">
+      <div class="nhi-logo">
+        <div class="nhi-logo-icon">N</div>
+        <span class="nhi-logo-text">NHI 资产发现</span>
       </div>
-      <el-menu :default-active="route.path" router background-color="#304156" text-color="#bfcbd9" active-text-color="#409eff">
+      <el-menu :default-active="route.path" router background-color="transparent" text-color="#9ca3af" active-text-color="#4096ff">
         <el-menu-item v-for="r in $router.options.routes.filter(r => r.meta && !r.meta.hidden)" :key="r.path" :index="r.path">
           <el-icon><component :is="(r.meta as any).icon" /></el-icon>
           <span>{{ (r.meta as any).title }}</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
+
     <el-container>
-      <el-header style="background: #fff; border-bottom: 1px solid #e6e6e6; display: flex; align-items: center; justify-content: space-between; height: 56px;">
-        <span style="font-size: 16px; font-weight: 600;">{{ (route.meta as any)?.title || 'NHI' }}</span>
-        <div v-if="health" style="font-size: 12px; color: #909399; display: flex; gap: 16px; align-items: center;">
-          <el-tag :type="health.probe_consumer === 'running' ? 'success' : 'danger'" size="small">Probe {{ health.probe_consumer }}</el-tag>
-          <el-tag :type="health.scan_scheduler === 'running' ? 'success' : 'info'" size="small">Scan {{ health.scan_scheduler }}</el-tag>
+      <el-header class="nhi-header">
+        <span class="nhi-page-title">{{ (route.meta as any)?.title || 'NHI' }}</span>
+        <div v-if="health" class="nhi-health-bar">
+          <el-tag :type="health.probe_consumer === 'running' ? 'success' : 'danger'" size="small">
+            Probe {{ health.probe_consumer }}
+          </el-tag>
+          <el-tag :type="health.scan_scheduler === 'running' ? 'success' : 'info'" size="small">
+            Scan {{ health.scan_scheduler }}
+          </el-tag>
+          <span class="nhi-health-sep">|</span>
           <span>DB {{ fmtSize(health.db_size_bytes) }}</span>
           <span>flows {{ health.tables?.flows ?? '-' }}</span>
         </div>
       </el-header>
-      <el-main style="padding: 16px; overflow-y: auto;">
+
+      <el-main class="nhi-main">
         <router-view />
       </el-main>
     </el-container>

@@ -183,7 +183,10 @@ class AiWriter:
             dst_ip = json_dict.get("dst_ip")
 
             # service 行：ip=dst_ip（仅当识别出 AI 服务）
-            if svc and dst_ip:
+            # DNS 流量的 dst_ip 是 DNS 服务器（网关），不是真实 AI 服务 IP，必须排除
+            _proto = (ndpi.get('proto') or '').upper()
+            _is_dns = _proto in ('DNS', 'MDNS', 'LLMNR') or str(json_dict.get('dst_port', '')) == '53'
+            if svc and dst_ip and not _is_dns:
                 models_append = []
                 for m in (signals["ollama_model"], signals["vllm_model"], signals["triton_model"]):
                     if m:

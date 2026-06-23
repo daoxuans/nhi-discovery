@@ -63,7 +63,8 @@ onMounted(load)
     </el-card>
 
     <el-card shadow="never">
-      <el-table :data="list" v-loading="loading" stripe @row-click="(r: AiEndpoint) => goDetail(r.ip)" style="cursor: pointer">
+      <div style="overflow-x: auto;">
+      <el-table :data="list" v-loading="loading" stripe @row-click="(r: AiEndpoint) => goDetail(r.ip)" style="cursor: pointer; min-width: 960px;">
         <el-table-column prop="ip" label="IP" width="140" />
         <el-table-column prop="role" label="角色" width="80">
           <template #default="{ row }">
@@ -96,6 +97,7 @@ onMounted(load)
           </template>
         </el-table-column>
       </el-table>
+      </div>
       <div style="margin-top: 12px; color: #909399; font-size: 13px;">显示 {{ list.length }} / {{ total }} 个端点，点击行查看端点画像</div>
     </el-card>
   </div>

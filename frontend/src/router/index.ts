@@ -5,7 +5,7 @@ const routes = [
   { path: '/dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'),
     meta: { title: '资产总览', icon: 'Odometer' } },
   { path: '/probe/endpoints', name: 'probe-endpoints', component: () => import('@/views/ProbeEndpointsView.vue'),
-    meta: { title: '被动端点资产', icon: 'Connection' } },
+    meta: { title: '探针识别资产', icon: 'Connection' } },
   { path: '/probe/endpoint/:ip', name: 'probe-endpoint-detail', component: () => import('@/views/EndpointDetailView.vue'),
     meta: { title: '端点画像', hidden: true } },
   { path: '/scan', name: 'scan', component: () => import('@/views/ScanView.vue'),
