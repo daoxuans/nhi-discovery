@@ -468,6 +468,48 @@ class Database:
             self._conn.commit()
             return cur.lastrowid
 
+    # ai_events 列顺序（批量写入复用）
+    _AI_EVENT_COLS = ["flow_id", "src_ip", "dst_ip", "src_port", "dst_port", "l4_proto",
+                      "proto", "proto_id", "hostname", "confidence",
+                      "ai_vendor", "ai_service", "ai_svc_type", "ai_color",
+                      "ai_agent", "ai_agent_vendor", "ai_agent_score",
+                      "ja4", "ja3", "user_agent",
+                      "mcp_method", "mcp_tool_name",
+                      "ollama_action", "ollama_model",
+                      "vllm_action", "vllm_model",
+                      "triton_endpoint", "triton_model",
+                      "event_type", "first_seen_usec"]
+
+    def insert_ai_events_batch(self, events: List[Dict]) -> int:
+        """批量 INSERT ai_events（executemany 单事务 commit），吞吐 ~10x。"""
+        if not events:
+            return 0
+        cols = self._AI_EVENT_COLS
+        placeholders = ",".join(["?"] * len(cols))
+        sql = f"INSERT INTO ai_events ({','.join(cols)}) VALUES ({placeholders})"
+        tuples = [
+            (e.get("flow_id"), e.get("src_ip"), e.get("dst_ip"),
+             e.get("src_port"), e.get("dst_port"), e.get("l4_proto"),
+             e.get("proto"), e.get("proto_id"), e.get("hostname"), e.get("confidence"),
+             e.get("ai_vendor"), e.get("ai_service"), e.get("ai_svc_type"), e.get("ai_color"),
+             e.get("ai_agent"), e.get("ai_agent_vendor"), e.get("ai_agent_score"),
+             e.get("ja4"), e.get("ja3"), e.get("user_agent"),
+             e.get("mcp_method"), e.get("mcp_tool_name"),
+             e.get("ollama_action"), e.get("ollama_model"),
+             e.get("vllm_action"), e.get("vllm_model"),
+             e.get("triton_endpoint"), e.get("triton_model"),
+             e.get("event_type", "detected"), e.get("first_seen_usec"))
+            for e in events
+        ]
+        with self._lock:
+            try:
+                self._conn.executemany(sql, tuples)
+                self._conn.commit()
+                return len(tuples)
+            except Exception:
+                self._conn.rollback()
+                raise
+
     def _ai_event_filter(self, ai_agent, ai_vendor, ai_service, src_ip):
         conditions, params = [], []
         if ai_agent:

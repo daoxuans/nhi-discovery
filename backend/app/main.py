@@ -48,7 +48,12 @@ async def lifespan(app: FastAPI):
     db_writer.start()
     app.state.db_writer = db_writer
 
-    ai_writer = AiWriter(db)
+    ai_writer = AiWriter(
+        db,
+        batch_interval=settings.db_writer_batch_interval,
+        batch_size=200,
+    )
+    ai_writer.start()
     app.state.ai_writer = ai_writer
 
     consumer = EventConsumer(
@@ -75,6 +80,8 @@ async def lifespan(app: FastAPI):
     logger.info("NHI Discovery shutting down ...")
     if getattr(app.state, "consumer", None):
         app.state.consumer.stop()
+    if getattr(app.state, "ai_writer", None):
+        app.state.ai_writer.stop()
     if getattr(app.state, "db_writer", None):
         app.state.db_writer.stop()
     if getattr(app.state, "scan_scheduler", None):
@@ -112,6 +119,7 @@ async def health():
     counts = db.table_counts()
     consumer = getattr(app.state, "consumer", None)
     db_writer = getattr(app.state, "db_writer", None)
+    ai_writer = getattr(app.state, "ai_writer", None)
     return {
         "status": "ok",
         "db_path": settings.db_path,
@@ -122,5 +130,8 @@ async def health():
         "probe_last_event_at": consumer.last_event_at if consumer else None,
         "probe_event_count": consumer._event_count if consumer else 0,
         "db_writer_queue_depth": db_writer.queue_depth if db_writer else 0,
+        "ai_writer_queue_depth": ai_writer.queue_depth if ai_writer else 0,
+        "ai_writer_written": ai_writer._written if ai_writer else 0,
+        "ai_writer_dropped": ai_writer._dropped if ai_writer else 0,
         "scan_scheduler": "running" if getattr(app.state, "scan_scheduler", None) else "stopped",
     }

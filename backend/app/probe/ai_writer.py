@@ -1,14 +1,18 @@
-"""AiWriter — AI 事件持久化（新增核心）。
+"""AiWriter — AI 事件持久化（异步批量写入）。
 
 detected/detection-update 事件 → 提取信号 → discover_ai_service + infer_agent
-→ 单事务 3 行：INSERT ai_events + UPSERT ai_endpoints(service行 + agent行)。
+→ 入内存队列 → 后台线程批量 INSERT ai_events + 批量 UPSERT ai_endpoints。
 
-路径 B：无 category 门控，对所有 detected 事件调 discover_ai_service()，
-非 AI 流返回 None 自然过滤。svc/agent 为 None 时 ai_events 仍写入（保留原始信号）。
+异步批量的目的：消费回调（_on_json）不阻塞 nDPIsrvd loop，避免
+"remote too slow" buffer overflow 丢事件。批量 executemany + 单事务 commit，
+SQLite 写锁串行化只在 commit 瞬间发生，吞吐提升 ~10x。
 """
 
 import logging
-from typing import Dict, Optional
+import queue
+import threading
+import time
+from typing import Dict, List, Optional
 
 from app.core.db import Database
 from app.probe.ai_service import discover_ai_service
@@ -114,14 +118,47 @@ def _extract_signals(ndpi: dict) -> Dict:
 
 
 class AiWriter:
-    """AI 事件持久化写入器（同步，无队列）。"""
+    """AI 事件持久化写入器（异步批量，生产-消费者模式）。
 
-    def __init__(self, db: Database):
+    insert() 只做信号提取 + 入队（O(1)，不碰 DB），后台线程批量落盘。
+    """
+
+    def __init__(self, db: Database, batch_interval: float = 1.0, batch_size: int = 200):
         self.db = db
+        self._batch_interval = batch_interval
+        self._batch_size = batch_size
+        self._queue: "queue.Queue[Optional[Dict]]" = queue.Queue(maxsize=20000)
+        self._thread: Optional[threading.Thread] = None
+        self._running = False
         self._count = 0
+        self._written = 0
+        self._dropped = 0
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        logger.info(f"AiWriter started (batch_size={self._batch_size})")
+
+    def stop(self):
+        self._running = False
+        # 哨兵唤醒等待中的 flush 线程
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+        if self._thread:
+            self._thread.join(timeout=10)
+        if self._dropped > 0:
+            logger.warning(f"AiWriter dropped {self._dropped} events total (queue full)")
+        logger.info(f"AiWriter stopped (received={self._count} written={self._written})")
+
+    @property
+    def queue_depth(self) -> int:
+        return self._queue.qsize()
 
     def insert(self, json_dict: dict):
-        """处理一个 detected/detection-update 事件。异常只记日志不抛。"""
+        """处理一个 detected/detection-update 事件：提取信号 + 入队。异常只记日志不抛。"""
         try:
             ndpi = json_dict.get("ndpi", {}) or {}
             if not isinstance(ndpi, dict):
@@ -140,9 +177,13 @@ class AiWriter:
             else:
                 confidence = confidence_raw
 
+            src_ip = json_dict.get("src_ip")
+            _proto = (ndpi.get('proto') or '').upper()
+            _is_dns = _proto in ('DNS', 'MDNS', 'LLMNR') or str(json_dict.get('dst_port', '')) == '53'
+
             event = {
                 "flow_id": json_dict.get("flow_id"),
-                "src_ip": json_dict.get("src_ip"),
+                "src_ip": src_ip,
                 "dst_ip": json_dict.get("dst_ip"),
                 "src_port": json_dict.get("src_port"),
                 "dst_port": json_dict.get("dst_port"),
@@ -176,44 +217,90 @@ class AiWriter:
                 "first_seen_usec": json_dict.get("flow_first_seen"),
             }
 
-            # 单事务写 3 行（ai_events + 2 行 ai_endpoints）
-            self.db.insert_ai_event(event)
-
-            src_ip = json_dict.get("src_ip")
-            dst_ip = json_dict.get("dst_ip")
-
+            # 端点 upsert 也推迟到批量阶段，这里只收集指令
+            endpoint_ops: List[Dict] = []
             # service 行：ip=dst_ip（仅当识别出 AI 服务）
             # DNS 流量的 dst_ip 是 DNS 服务器（网关），不是真实 AI 服务 IP，必须排除
-            _proto = (ndpi.get('proto') or '').upper()
-            _is_dns = _proto in ('DNS', 'MDNS', 'LLMNR') or str(json_dict.get('dst_port', '')) == '53'
-            if svc and dst_ip and not _is_dns:
+            dst_ip_real = json_dict.get("dst_ip")
+            if svc and dst_ip_real and not _is_dns:
                 models_append = []
                 for m in (signals["ollama_model"], signals["vllm_model"], signals["triton_model"]):
                     if m:
                         models_append.append(m)
-                self.db.upsert_ai_endpoint(
-                    ip=dst_ip, role="service", name=svc["service"],
-                    vendor=svc["vendor"], category=svc["svc_type"],
-                    models_append=models_append or None,
-                    source="probe",
-                )
+                endpoint_ops.append({
+                    "ip": dst_ip_real, "role": "service", "name": svc["service"],
+                    "vendor": svc["vendor"], "category": svc["svc_type"],
+                    "ja4_append": None, "user_agent": None,
+                    "models_append": models_append or None, "source": "probe",
+                })
 
             # agent 行：ip=src_ip（仅当识别出 Agent 客户端）
             if agent and src_ip:
-                # category 由 agent 身份决定（兜底推断），不随 svc 变化
-                # —— GitHub Copilot 永远是 AI_Coding，即使该流访问的是 LLM_Web 服务
                 agent_category = _infer_agent_category(agent["agent"])
-                self.db.upsert_ai_endpoint(
-                    ip=src_ip, role="agent", name=agent["agent"],
-                    vendor=agent["vendor"],
-                    category=agent_category,
-                    ja4_append=signals["ja4"],
-                    user_agent=signals["user_agent"],
-                    source="probe",
-                )
+                endpoint_ops.append({
+                    "ip": src_ip, "role": "agent", "name": agent["agent"],
+                    "vendor": agent["vendor"], "category": agent_category,
+                    "ja4_append": signals["ja4"], "user_agent": signals["user_agent"],
+                    "models_append": None, "source": "probe",
+                })
 
             self._count += 1
-            if self._count % 100 == 0:
-                logger.info(f"AiWriter inserted {self._count} AI events")
+            try:
+                self._queue.put_nowait({"event": event, "endpoints": endpoint_ops})
+            except queue.Full:
+                self._dropped += 1
+                if self._dropped % 500 == 0:
+                    logger.warning(f"AiWriter dropped {self._dropped} (queue full)")
         except Exception as e:
             logger.error(f"AiWriter insert failed: {type(e).__name__}: {e}", exc_info=True)
+
+    def _run(self):
+        while self._running:
+            time.sleep(self._batch_interval)
+            self._flush(force=False)
+        # 退出前冲刷剩余
+        self._flush(force=True)
+
+    def _flush(self, force: bool):
+        batch = []
+        limit = 0 if force else self._batch_size
+        while not self._queue.empty():
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:  # 哨兵
+                continue
+            batch.append(item)
+            if limit and len(batch) >= limit:
+                break
+        if not batch:
+            return
+
+        events = [b["event"] for b in batch]
+        all_endpoints: List[Dict] = []
+        for b in batch:
+            all_endpoints.extend(b["endpoints"])
+
+        # 批量 INSERT ai_events（executemany 单事务）
+        try:
+            written = self.db.insert_ai_events_batch(events)
+            self._written += written
+        except Exception as e:
+            logger.error(f"AiWriter batch insert failed ({e}), fallback to per-row")
+            for ev in events:
+                try:
+                    self.db.insert_ai_event(ev)
+                    self._written += 1
+                except Exception as e2:
+                    logger.error(f"AiWriter per-row insert failed: {e2}")
+
+        # 批量 UPSERT ai_endpoints（逐条但同一连接，锁开销小）
+        for op in all_endpoints:
+            try:
+                self.db.upsert_ai_endpoint(**op)
+            except Exception as e:
+                logger.error(f"AiWriter upsert failed ({op.get('ip')}/{op.get('role')}): {e}")
+
+        if self._written % 1000 < self._batch_size:
+            logger.info(f"AiWriter written={self._written} queue={self._queue.qsize()}")
