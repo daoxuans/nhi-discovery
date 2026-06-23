@@ -38,19 +38,24 @@ _AGENT_CATEGORY_FALLBACK = {
     "Trae": "AI_Coding",
     "CodeBuddy": "AI_Coding",
     "Lingma": "AI_Coding",
+    "Lingma (通义灵码)": "AI_Coding",
     "Windsurf": "AI_Coding",
     "Cline": "AI_Coding",
+    "WorkBuddy / CodeBuddy": "AI_Coding",
     "Claude Web": "LLM_Web",
-    "Claude Client": "LLM_API",
     "ChatGPT Web": "LLM_Web",
+    "DeepSeek Chat Web": "LLM_Web",
+    "Doubao Client (豆包)": "LLM_Web",
+    "Claude Client": "LLM_API",
     "OpenAI Client": "LLM_API",
     "DeepSeek Client": "LLM_API",
-    "DeepSeek Chat Web": "LLM_Web",
     "Ollama Client": "LLM_Local",
     "vLLM Client": "LLM_Local",
     "Triton Client": "LLM_Local",
     "MCP Agent": "AI_Protocol",
     "OpenRouter Client": "LLM_Gateway",
+    "Ruijie Gateway Client": "LLM_Gateway",
+    "Portkey Client": "LLM_Gateway",
 }
 
 
@@ -192,8 +197,9 @@ class AiWriter:
 
             # agent 行：ip=src_ip（仅当识别出 Agent 客户端）
             if agent and src_ip:
-                # category 兜底：svc 优先，否则按 agent 名推断类型
-                agent_category = svc["svc_type"] if svc else _infer_agent_category(agent["agent"])
+                # category 由 agent 身份决定（兜底推断），不随 svc 变化
+                # —— GitHub Copilot 永远是 AI_Coding，即使该流访问的是 LLM_Web 服务
+                agent_category = _infer_agent_category(agent["agent"])
                 self.db.upsert_ai_endpoint(
                     ip=src_ip, role="agent", name=agent["agent"],
                     vendor=agent["vendor"],

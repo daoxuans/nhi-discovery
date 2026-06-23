@@ -515,20 +515,21 @@ class Database:
 
         # percentage 口径修正：只用"确认的 AI 事件"（ai_vendor 非 NULL）算占比，
         # 避免路径B去门控后大量未命中规则的 detected 事件虚高占比
+        # top_ja4/top_hostnames 也只统计 confirmed，避免非 AI 域名（如 aq.ruijie）霸榜
         with self._lock:
             total = self._conn.execute(f"SELECT COUNT(*) FROM ai_events{cond}").fetchone()[0]
+            confirmed_cond = f"{cond} {'AND' if cond else 'WHERE'} ai_vendor IS NOT NULL"
             confirmed = self._conn.execute(
-                f"SELECT COUNT(*) FROM ai_events{cond} "
-                f"{'AND' if cond else 'WHERE'} ai_vendor IS NOT NULL"
+                f"SELECT COUNT(*) FROM ai_events {confirmed_cond}"
             ).fetchone()[0]
             flows_total = self._conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
             top_ja4 = [dict(r) for r in self._conn.execute(
-                f"SELECT ja4, COUNT(*) as count FROM ai_events {cond} {joiner if cond else ''} "
-                f"ja4 IS NOT NULL AND ja4 != '' GROUP BY ja4 ORDER BY count DESC LIMIT 10"
+                f"SELECT ja4, COUNT(*) as count FROM ai_events {confirmed_cond} "
+                f"AND ja4 IS NOT NULL AND ja4 != '' GROUP BY ja4 ORDER BY count DESC LIMIT 10"
             ).fetchall()]
             top_hostnames = [dict(r) for r in self._conn.execute(
-                f"SELECT hostname, COUNT(*) as count FROM ai_events {cond} {joiner if cond else ''} "
-                f"hostname IS NOT NULL AND hostname != '' GROUP BY hostname ORDER BY count DESC LIMIT 10"
+                f"SELECT hostname, COUNT(*) as count FROM ai_events {confirmed_cond} "
+                f"AND hostname IS NOT NULL AND hostname != '' GROUP BY hostname ORDER BY count DESC LIMIT 10"
             ).fetchall()]
         percentage = round(confirmed / flows_total * 100, 2) if flows_total else 0.0
         return {
