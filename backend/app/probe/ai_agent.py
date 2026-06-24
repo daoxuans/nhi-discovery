@@ -402,18 +402,32 @@ def _collect_signals(ndpi: dict) -> Dict[str, str]:
 
 
 def _score_agent(agent_rule: Dict, signals: Dict[str, str]) -> float:
-    """Score a single agent rule against available signals."""
+    """Score a single agent rule against available signals.
+
+    返回 -1 表示"不可采信"（无强证据）：JA4/user_agent 等指纹信号易撞车，
+    不能单独判定 AI agent。必须有 hostname/proto/专用协议字段等强证据
+    命中，分数才有效。
+    """
     score = 0.0
-    seen_signals = set()
+    # 强证据信号集合：hostname / proto / 专用协议字段（mcp/ollama/vllm/triton）
+    STRONG_SIGNALS = {
+        "hostname", "proto", "mcp_method", "mcp_tool",
+        "ollama_action", "ollama_model", "vllm_action", "vllm_model",
+        "triton_endpoint", "triton_model",
+    }
+    has_strong = False
     for signal_name, pattern, weight in agent_rule["evidence"]:
         value = signals.get(signal_name, "")
         if not value:
             continue
-        if signal_name not in seen_signals:
-            seen_signals.add(signal_name)
-        # Substring match
+        # 子串匹配
         if pattern.lower() in value.lower():
             score += weight
+            if signal_name in STRONG_SIGNALS:
+                has_strong = True
+    # 无强证据命中 → 指纹撞车，拒绝判定（防止 iPhone/字节系 App 被误判为 Trae/豆包）
+    if not has_strong:
+        return -1.0
     return score
 
 
@@ -435,6 +449,9 @@ def infer_agent(ndpi: dict) -> Optional[dict]:
 
     for rule in AGENT_INFERENCE_RULES:
         score = _score_agent(rule, signals)
+        # score=-1 表示无强证据（指纹撞车），直接跳过
+        if score < 0:
+            continue
         if score >= rule["min_confidence"] and score > best_score:
             best_score = score
             best_agent = {
