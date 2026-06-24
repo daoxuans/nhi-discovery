@@ -310,6 +310,7 @@ class Database:
         # stats 结果缓存：{time_range: (mono_ts, result)}，TTL 30s
         self._stats_cache: Dict[str, Any] = {}
         self._flow_stats_cache: Optional[Any] = None  # (mono_ts, result)
+        self._table_counts_cache: Optional[Any] = None  # (mono_ts, result) TTL 10s
 
     def _init_schema(self):
         with self._lock:
@@ -813,15 +814,13 @@ class Database:
         if enabled_only:
             sql += " WHERE enabled=1"
         sql += " ORDER BY id"
-        with self._lock:
-            rows = self._conn.execute(sql).fetchall()
+        rows = self._read_conn.execute(sql).fetchall()
         return [dict(r) for r in rows]
 
     def get_scan_target(self, target_id) -> Optional[Dict]:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM scan_targets WHERE id=?", (target_id,)
-            ).fetchone()
+        row = self._read_conn.execute(
+            "SELECT * FROM scan_targets WHERE id=?", (target_id,)
+        ).fetchone()
         return dict(row) if row else None
 
     # ──────────────── Scan: tasks ────────────────
@@ -1012,11 +1011,10 @@ class Database:
 
     def list_ai_service_ips(self) -> List[Dict]:
         """Scan 融合用：取所有 ai_services 的 ip/port/service/version。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT ip, port, service, vendor, version FROM ai_services "
-                "WHERE lifecycle_state='active'"
-            ).fetchall()
+        rows = self._read_conn.execute(
+            "SELECT ip, port, service, vendor, version FROM ai_services "
+            "WHERE lifecycle_state='active'"
+        ).fetchall()
         return [dict(r) for r in rows]
 
     def update_ai_service_fusion(self, ip, port, service, probe_seen=None,
@@ -1039,7 +1037,12 @@ class Database:
             self._conn.commit()
 
     def update_ai_endpoint_fusion(self, ip, scan_seen=None, scan_last_seen=None,
-                                  fused_confidence=None):
+                                  fused_confidence=None, name=None):
+        """更新 ai_endpoints 融合字段。
+
+        name: 若提供则按 (ip, role='service', name) 精确匹配，避免一 IP 多服务
+        时全标 scan_seen（M4）。不传则回退到按 ip+role 全量更新（向后兼容）。
+        """
         sets, params = [], []
         if scan_seen is not None: sets.append("scan_seen=?"); params.append(scan_seen)
         if scan_last_seen is not None: sets.append("scan_last_seen=?"); params.append(scan_last_seen)
@@ -1047,10 +1050,13 @@ class Database:
         if not sets:
             return
         params.append(ip)
+        where = "WHERE ip=? AND role='service'"
+        if name is not None:
+            where += " AND name=?"
+            params.append(name)
         with self._lock:
             self._conn.execute(
-                f"UPDATE ai_endpoints SET {', '.join(sets)} WHERE ip=? AND role='service'",
-                params
+                f"UPDATE ai_endpoints SET {', '.join(sets)} {where}", params
             )
             self._conn.commit()
 
@@ -1176,8 +1182,9 @@ class Database:
         list_params = params + [limit, offset]
         rc = self._read_conn
         rows = rc.execute(sql, list_params).fetchall()
+        # COUNT(DISTINCT s.id) 避免 LEFT JOIN 一对多时 total 重复计数（M1）
         total = rc.execute(
-            f"SELECT COUNT(*) FROM ai_services s LEFT JOIN ai_endpoints e "
+            f"SELECT COUNT(DISTINCT s.id) FROM ai_services s LEFT JOIN ai_endpoints e "
             f"ON s.ip=e.ip AND e.role='service' {where}", params
         ).fetchone()[0]
         return {"assets": [dict(r) for r in rows], "total": total}
@@ -1185,6 +1192,11 @@ class Database:
     # ──────────────── 表行数（health 用）────────────────
 
     def table_counts(self) -> Dict[str, int]:
+        """9 表 COUNT。加 10s 缓存（health 每 10s 轮询，命中缓存避免 9 次扫描）。"""
+        now_mono = _mono()
+        cached = self._table_counts_cache
+        if cached and (now_mono - cached[0]) < 10.0:
+            return cached[1]
         tables = ["flows", "ai_events", "ai_endpoints", "scan_targets",
                   "scan_tasks", "scan_findings", "ai_services", "cve_records",
                   "asset_lifecycle"]
@@ -1196,6 +1208,7 @@ class Database:
             except Exception as e:
                 logger.warning(f"table_counts {t} failed: {e}")
                 result[t] = 0
+        self._table_counts_cache = (now_mono, result)
         return result
 
     def db_file_size(self) -> int:

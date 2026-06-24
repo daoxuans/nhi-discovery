@@ -1,5 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+// 模块增强：让 RouteMeta 支持 title/icon/hidden 字段，消除模板里的 as any
+declare module 'vue-router' {
+  interface RouteMeta {
+    title?: string
+    icon?: string
+    hidden?: boolean
+  }
+}
+
 const routes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'),
@@ -20,4 +29,5 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 })
 
+export { routes }
 export default router

@@ -100,12 +100,14 @@ const findings = ref<ScanFinding[]>([])
 const findingsTaskId = ref<string>('')
 const findingsPage = ref(1)
 const findingsTotal = ref(0)
+const findingsLoading = ref(false)
 const loadFindings = async () => {
   const taskId = findingsTaskId.value ? Number(findingsTaskId.value) : undefined
+  findingsLoading.value = true
   try {
     const r = await getScanFindings({ task_id: taskId, limit: 50, offset: (findingsPage.value - 1) * 50 })
     findings.value = r.findings; findingsTotal.value = r.total
-  } catch {}
+  } finally { findingsLoading.value = false }
 }
 
 // ── 服务资产 ──
@@ -240,7 +242,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
         <el-input v-model="findingsTaskId" placeholder="task_id 过滤" style="width: 140px" />
         <el-button @click="() => { findingsPage = 1; loadFindings() }">查询</el-button>
       </div>
-      <el-table :data="findings" stripe size="small" max-height="560">
+      <el-table :data="findings" stripe size="small" max-height="560" v-loading="findingsLoading">
         <el-table-column prop="ip" label="IP" width="140" />
         <el-table-column prop="port" label="端口" width="70" />
         <el-table-column prop="state" label="状态" width="70" />

@@ -6,6 +6,7 @@ import { getAiEndpoint, type EndpointDetail } from '@/api/probe'
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
+const error = ref(false)
 const detail = ref<EndpointDetail | null>(null)
 const ip = ref(route.params.ip as string)
 
@@ -13,8 +14,14 @@ const parseArr = (s: string) => { try { return JSON.parse(s || '[]') as string[]
 
 const load = async () => {
   loading.value = true
+  error.value = false
   detail.value = null
-  try { detail.value = await getAiEndpoint(ip.value) } finally { loading.value = false }
+  try {
+    detail.value = await getAiEndpoint(ip.value)
+  } catch (e) {
+    console.error('[EndpointDetail] load error:', e)
+    error.value = true
+  } finally { loading.value = false }
 }
 
 watch(() => route.params.ip, (newIp) => {
@@ -29,6 +36,11 @@ onMounted(load)
     <el-page-header @back="router.back()" style="margin-bottom: 16px;">
       <template #content>端点画像 — {{ ip }}</template>
     </el-page-header>
+
+    <el-alert v-if="error" type="error" :closable="false" class="mb-16" title="加载失败">
+      无法获取端点 {{ ip }} 的画像数据，请检查后端服务或稍后重试。
+      <el-button link type="primary" @click="load">重试</el-button>
+    </el-alert>
 
     <template v-if="detail">
       <el-row :gutter="12" class="mb-16">

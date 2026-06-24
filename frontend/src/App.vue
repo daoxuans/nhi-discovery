@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { routes } from '@/router'
 import { getHealth, type HealthResp } from '@/api/probe'
 
 const route = useRoute()
@@ -30,16 +31,16 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         <span class="nhi-logo-text">NHI 资产发现</span>
       </div>
       <el-menu :default-active="route.path" router background-color="transparent" text-color="#9ca3af" active-text-color="#4096ff">
-        <el-menu-item v-for="r in $router.options.routes.filter(r => r.meta && !r.meta.hidden)" :key="r.path" :index="r.path">
-          <el-icon><component :is="(r.meta as any).icon" /></el-icon>
-          <span>{{ (r.meta as any).title }}</span>
+        <el-menu-item v-for="r in routes.filter(r => r.meta && !r.meta.hidden)" :key="r.path" :index="r.path">
+          <el-icon><component :is="r.meta!.icon" /></el-icon>
+          <span>{{ r.meta!.title }}</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
 
     <el-container>
       <el-header class="nhi-header">
-        <span class="nhi-page-title">{{ (route.meta as any)?.title || 'NHI' }}</span>
+        <span class="nhi-page-title">{{ route.meta?.title || 'NHI' }}</span>
         <div v-if="health" class="nhi-health-bar">
           <el-tag :type="health.probe_consumer === 'running' ? 'success' : 'danger'" size="small">
             Probe {{ health.probe_consumer }}

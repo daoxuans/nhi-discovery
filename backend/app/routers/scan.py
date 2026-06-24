@@ -112,7 +112,10 @@ async def trigger_scan(request: Request, body: TriggerBody = None):
             db.update_scan_task(task_id, status="failed", finished_at=now_cst(),
                                 error_msg=str(e))
 
-    _running_tasks[task_id] = asyncio.create_task(_bg())
+    task = asyncio.create_task(_bg())
+    _running_tasks[task_id] = task
+    # 任务完成后自动清理，避免 _running_tasks 无限增长（M2）
+    task.add_done_callback(lambda _, tid=task_id: _running_tasks.pop(tid, None))
     return {"task_id": task_id, "task_uuid": task_uuid, "status": "queued", "cidr": cidr}
 
 

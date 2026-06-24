@@ -114,11 +114,12 @@ async def _run_incremental_scan(db: Database):
 async def _run_cve_rescan(db: Database):
     """CVE 库更新后对已知版本重扫。"""
     from app.scan.workers.version_extractor import correlate_cve
+    from app.scan.scan_runner import _risk_from_cves
     services = db.list_ai_service_ips()
     for svc in services:
         cves = correlate_cve(db, svc.get("vendor"), None)
         if cves:
-            risk = "high" if any(c.get("severity") in ("critical", "high") for c in cves) else "medium"
+            risk = _risk_from_cves(cves)  # 复用 scan_runner 的风险分级（含 low）
             db.update_ai_service_fusion(
                 svc["ip"], svc["port"], svc["service"],
                 risk_level=risk, cve_count=len(cves),

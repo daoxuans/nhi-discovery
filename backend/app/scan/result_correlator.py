@@ -77,10 +77,12 @@ def correlate_scan_results(db: Database, task_id: int):
         )
         # 回写 ai_endpoints（反向：Probe 侧标记 scan_seen）
         if probe_hit:
-            db.update_ai_endpoint_fusion(
-                ip, scan_seen=1, scan_last_seen=now_cst(),
-                fused_confidence=fused_conf,
-            )
+            # 按 name 精确匹配命中的 endpoint，避免一 IP 多服务时全标 scan_seen（M4）
+            for pe in probe_endpoints:
+                db.update_ai_endpoint_fusion(
+                    ip, scan_seen=1, scan_last_seen=now_cst(),
+                    fused_confidence=fused_conf, name=pe["name"],
+                )
         fused += 1
 
     logger.info(f"correlate task {task_id}: fused={fused}, dual={dual}, "
