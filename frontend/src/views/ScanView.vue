@@ -47,8 +47,8 @@ const openEdit = (t: ScanTarget) => {
   editing.value = t
   Object.assign(targetForm, {
     name: t.name, cidr: t.cidr, scan_strategy: t.scan_strategy,
-    schedule_interval: (t as any).schedule_interval || t.full_interval,
-    speed: (t as any).speed || 'normal', enabled: t.enabled,
+    schedule_interval: t.schedule_interval ?? t.full_interval,
+    speed: t.speed ?? 'normal', enabled: t.enabled,
   })
   targetDialog.value = true
 }
@@ -166,15 +166,16 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
         <el-button type="primary" @click="openCreate">新建目标</el-button>
         <el-button @click="loadTargets">刷新</el-button>
       </div>
-      <el-table :data="targets" stripe>
+      <div style="overflow-x: auto;">
+      <el-table :data="targets" stripe style="min-width: 960px;">
         <el-table-column prop="name" label="名称" width="120" />
         <el-table-column prop="cidr" label="扫描范围" min-width="180" show-overflow-tooltip />
         <el-table-column prop="scan_strategy" label="策略" width="130" />
         <el-table-column label="定时间隔" width="110">
-          <template #default="{ row }">{{ ((row as any).schedule_interval || row.full_interval) }}s</template>
+          <template #default="{ row }">{{ row.schedule_interval ?? row.full_interval }}s</template>
         </el-table-column>
         <el-table-column label="速率" width="90">
-          <template #default="{ row }"><el-tag size="small">{{ (row as any).speed || 'normal' }}</el-tag></template>
+          <template #default="{ row }"><el-tag size="small">{{ row.speed ?? 'normal' }}</el-tag></template>
         </el-table-column>
         <el-table-column label="启用" width="80">
           <template #default="{ row }">
@@ -188,6 +189,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <el-dialog v-model="targetDialog" :title="editing ? '编辑扫描目标' : '新建扫描目标'" width="520px">
         <el-form :model="targetForm" label-width="100px">
@@ -220,7 +222,8 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
     <!-- 任务列表 -->
     <el-tab-pane label="扫描任务" name="tasks">
       <el-button class="mb-12" @click="loadTasks">刷新</el-button>
-      <el-table :data="tasks" stripe size="small">
+      <div style="overflow-x: auto;">
+      <el-table :data="tasks" stripe size="small" style="min-width: 920px;">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="task_type" label="类型" width="90" />
         <el-table-column prop="status" label="状态" width="90">
@@ -232,6 +235,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
         <el-table-column prop="finished_at" label="结束" width="160" />
         <el-table-column prop="error_msg" label="错误" show-overflow-tooltip />
       </el-table>
+      </div>
       <el-pagination v-if="taskTotal > 0" v-model:current-page="taskPage" :page-size="100" :total="taskTotal"
         layout="prev, pager, next, total" background class="mt-12" @current-change="loadTasks" />
     </el-tab-pane>
@@ -242,7 +246,8 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
         <el-input v-model="findingsTaskId" placeholder="task_id 过滤" style="width: 140px" />
         <el-button @click="() => { findingsPage = 1; loadFindings() }">查询</el-button>
       </div>
-      <el-table :data="findings" stripe size="small" max-height="560" v-loading="findingsLoading">
+      <div style="overflow-x: auto;">
+      <el-table :data="findings" stripe size="small" max-height="560" v-loading="findingsLoading" style="min-width: 1020px;">
         <el-table-column prop="ip" label="IP" width="140" />
         <el-table-column prop="port" label="端口" width="70" />
         <el-table-column prop="state" label="状态" width="70" />
@@ -254,6 +259,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
         <el-table-column prop="confidence" label="置信度" width="80" align="right" />
         <el-table-column prop="found_at" label="发现时间" width="160" />
       </el-table>
+      </div>
       <el-pagination v-if="findingsTotal > 0" v-model:current-page="findingsPage" :page-size="50" :total="findingsTotal"
         layout="prev, pager, next, total" background class="mt-12" @current-change="loadFindings" />
     </el-tab-pane>
@@ -261,7 +267,8 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
     <!-- 服务资产 -->
     <el-tab-pane label="AI服务资产" name="services">
       <el-button class="mb-12" @click="loadServices">刷新</el-button>
-      <el-table :data="services" stripe size="small" max-height="560">
+      <div style="overflow-x: auto;">
+      <el-table :data="services" stripe size="small" max-height="560" style="min-width: 920px;">
         <el-table-column prop="ip" label="IP" width="140" />
         <el-table-column prop="port" label="端口" width="70" />
         <el-table-column prop="service" label="服务" min-width="120" />
@@ -279,6 +286,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
         </el-table-column>
         <el-table-column prop="cve_count" label="CVE数" width="70" align="right" />
       </el-table>
+      </div>
       <el-pagination v-if="svcTotal > 0" v-model:current-page="svcPage" :page-size="50" :total="svcTotal"
         layout="prev, pager, next, total" background class="mt-12" @current-change="loadServices" />
     </el-tab-pane>
@@ -286,7 +294,8 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
     <!-- CVE -->
     <el-tab-pane label="CVE漏洞" name="cve">
       <el-button class="mb-12" @click="loadCves">刷新</el-button>
-      <el-table :data="cves" stripe size="small">
+      <div style="overflow-x: auto;">
+      <el-table :data="cves" stripe size="small" style="min-width: 780px;">
         <el-table-column prop="cve_id" label="CVE ID" width="180" class-name="mono" />
         <el-table-column prop="service" label="服务" width="120" />
         <el-table-column prop="affected_version" label="影响版本" width="120" />
@@ -296,6 +305,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
         <el-table-column prop="cvss_score" label="CVSS" width="70" align="right" />
         <el-table-column prop="description" label="描述" show-overflow-tooltip />
       </el-table>
+      </div>
       <el-pagination v-if="cveTotal > 0" v-model:current-page="cvePage" :page-size="50" :total="cveTotal"
         layout="prev, pager, next, total" background class="mt-12" @current-change="loadCves" />
     </el-tab-pane>
