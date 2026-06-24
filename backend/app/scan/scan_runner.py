@@ -206,13 +206,15 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
             db.insert_scan_findings_batch(scan_findings)
 
         # ── UPSERT ai_services + CVE 关联 ──
+        # 一次扫描只 load 一次全量 CVE（B7：避免每服务重复全表读）
+        cached_cves = db.list_all_cves()
         for svc in ai_service_upserts:
             db.upsert_ai_service(
                 ip=svc["ip"], port=svc["port"], service=svc["service"],
                 vendor=svc["vendor"], svc_type=svc["svc_type"],
                 version=svc["version"], models=svc["models"], source="scan",
             )
-            cves = correlate_cve(db, svc["vendor"], svc["version"])
+            cves = correlate_cve(db, svc["vendor"], svc["version"], cached_cves=cached_cves)
             if cves:
                 risk = _risk_from_cves(cves)
                 db.update_ai_service_fusion(

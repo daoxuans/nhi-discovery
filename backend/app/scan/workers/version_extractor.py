@@ -59,12 +59,18 @@ def version_match(version: Optional[str], affected: str) -> bool:
     return True
 
 
-def correlate_cve(db: Database, service: str, version: Optional[str]) -> List[dict]:
-    """查询某服务某版本关联的 CVE。"""
-    all_cves = db.list_all_cves()
+def correlate_cve(db: Database, service: str, version: Optional[str],
+                  cached_cves: List[dict] = None) -> List[dict]:
+    """查询某服务某版本关联的 CVE。
+
+    cached_cves: 若调用方已 load 过全量 CVE（如 scan_runner 一次扫描复用），
+    直接传入复用，避免每服务重复全表读。
+    """
+    all_cves = cached_cves if cached_cves is not None else db.list_all_cves()
     matched = []
+    svc_lower = (service or "").lower()
     for cve in all_cves:
-        if cve.get("service") and cve["service"].lower() not in (service or "").lower():
+        if cve.get("service") and cve["service"].lower() not in svc_lower:
             continue
         if version_match(version, cve.get("affected_version", "*")):
             matched.append(cve)

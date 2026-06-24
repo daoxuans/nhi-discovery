@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getAiEndpoint } from '@/api/probe'
+import { getAiEndpoint, type EndpointDetail } from '@/api/probe'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
-const detail = ref<any>(null)
+const detail = ref<EndpointDetail | null>(null)
 const ip = ref(route.params.ip as string)
 
 const parseArr = (s: string) => { try { return JSON.parse(s || '[]') as string[] } catch { return [] } }

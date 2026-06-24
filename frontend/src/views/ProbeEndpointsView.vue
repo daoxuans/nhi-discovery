@@ -13,7 +13,6 @@ const page = ref(1)
 const pageSize = 20
 
 const parseJa4 = (s: string) => { try { return JSON.parse(s || '[]') as string[] } catch { return [] } }
-const parseModels = (s: string) => { try { return JSON.parse(s || '[]') as string[] } catch { return [] } }
 
 const load = async () => {
   loading.value = true
@@ -22,7 +21,8 @@ const load = async () => {
       role: role.value || undefined, name: keyword.value || undefined,
       limit: pageSize, offset: (page.value - 1) * pageSize,
     })
-    list.value = res.endpoints
+    // 预处理：把 ja4_list 解析成行内字段，避免模板每次渲染都 JSON.parse
+    list.value = res.endpoints.map(e => ({ ...e, _ja4_count: parseJa4(e.ja4_list).length }))
     total.value = res.total
   } finally { loading.value = false }
 }
@@ -83,7 +83,7 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="JA4 指纹" width="160">
           <template #default="{ row }">
-            <span class="mono" style="font-size: 12px;">{{ parseJa4(row.ja4_list).length }} 个</span>
+            <span class="mono" style="font-size: 12px;">{{ row._ja4_count ?? 0 }} 个</span>
           </template>
         </el-table-column>
         <el-table-column prop="flow_count" label="流次数" width="90" align="right" sortable />

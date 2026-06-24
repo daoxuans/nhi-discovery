@@ -122,7 +122,7 @@ const cveTotal = ref(0)
 const loadCves = async () => { try { const r = await listScanCves({ limit: 50, offset: (cvePage.value - 1) * 50 }); cves.value = r.cves; cveTotal.value = r.total } catch {} }
 const cveTag = (s: string) => s === 'critical' ? 'danger' : s === 'high' ? 'danger' : s === 'medium' ? 'warning' : 'info'
 
-onMounted(() => { loadTargets(); loadTasks(); loadFindings(); loadServices(); loadCves() })
+onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
 </script>
 
 <template>

@@ -89,16 +89,23 @@ const onResize = () => {
     if (r.value) echarts.getInstanceByDom(r.value)?.resize()
   })
 }
+// 防抖：resize 事件高频触发，150ms 内只 resize 一次
+let resizeTimer: number | null = null
+const onResizeDebounced = () => {
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = window.setTimeout(onResize, 150)
+}
 
 onMounted(async () => {
   await load()
   timer = window.setInterval(load, 30000)
-  window.addEventListener('resize', onResize)
+  window.addEventListener('resize', onResizeDebounced)
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
-  window.removeEventListener('resize', onResize)
+  if (resizeTimer) clearTimeout(resizeTimer)
+  window.removeEventListener('resize', onResizeDebounced)
   ;[vendorEl, agentEl, svcTypeEl, detectionEl].forEach(r => {
     if (r.value) echarts.getInstanceByDom(r.value)?.dispose()
   })

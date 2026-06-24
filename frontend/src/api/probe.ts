@@ -45,11 +45,34 @@ export interface AiEndpoint {
   fused_confidence: number | null
 }
 
+/** 端点画像响应（/ai/endpoint/{ip}） */
+export interface EndpointDetail {
+  ip: string
+  agents: AiEndpoint[]
+  services: AiEndpoint[]
+  scan_services: Array<{
+    port: number
+    service: string
+    vendor: string | null
+    version: string | null
+    lifecycle_state: string
+    scan_count: number
+    last_seen: string
+  }>
+  timeline: Array<{
+    occurred_at: string
+    event_type: string
+    old_state: string | null
+    new_state: string | null
+    detail: string | null
+  }>
+}
+
 export const getAiEndpoints = (params: {
   role?: string; ip?: string; name?: string; limit?: number; offset?: number
 }) => http.get<unknown, { endpoints: AiEndpoint[]; total: number }>('/ai/endpoints', { params })
 
-export const getAiEndpoint = (ip: string) => http.get<unknown, any>(`/ai/endpoint/${ip}`)
+export const getAiEndpoint = (ip: string) => http.get<unknown, EndpointDetail>(`/ai/endpoint/${ip}`)
 
 export interface AiEvent {
   id: number

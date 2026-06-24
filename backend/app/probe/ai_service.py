@@ -5,7 +5,10 @@ Maps network traffic to AI services based on hostname, protocol and nDPI metadat
 Output: {vendor, service, service_type, color, confidence}
 """
 
+import logging
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 AI_SERVICE_RULES: List[Dict] = [
     # ── Major LLM API Providers ────────────────────────────────
@@ -113,9 +116,33 @@ AI_SERVICE_RULES: List[Dict] = [
 ]
 
 
+def _build_lookup_indexes():
+    """预构建 hostname → rules 索引，避免每流线性扫全表（B10）。
+
+    返回 (hostname_index, proto_rules, wildcard_rules)：
+    - hostname_index: 精确 hostname → [rule]；还有按域名后缀匹配用 sorted 列表
+    - proto_rules: 仅按 proto 匹配的规则（hostname=="*"）
+    """
+    hostname_index: Dict[str, List[Dict]] = {}
+    proto_rules: List[Dict] = []
+    for rule in AI_SERVICE_RULES:
+        hn = rule["hostname"]
+        if hn == "*":
+            proto_rules.append(rule)
+        else:
+            hostname_index.setdefault(hn, []).append(rule)
+    # 按域名长度降序，保证最长后缀优先匹配
+    suffix_sorted = sorted(hostname_index.keys(), key=len, reverse=True)
+    return hostname_index, suffix_sorted, proto_rules
+
+
+_HOSTNAME_INDEX, _HOSTNAME_SUFFIX_SORTED, _PROTO_ONLY_RULES = _build_lookup_indexes()
+
+
 def discover_ai_service(ndpi: dict) -> Optional[dict]:
     """Match an nDPI flow against AI service rules.
 
+    优先 O(1) hostname 精确匹配，再按后缀匹配，最后 proto-only 兜底。
     Returns:
         {vendor, service, svc_type, color} or None if not AI traffic.
     """
@@ -125,30 +152,46 @@ def discover_ai_service(ndpi: dict) -> Optional[dict]:
     if not proto and not hostname:
         return None
 
-    # Also check nDPI metadata sub-objects for local AI protocols
-    for ai_key in ("mcp", "ollama", "vllm"):
-        if isinstance(ndpi.get(ai_key), dict):
-            # nDPI detected this protocol, try service rules with proto match
-            pass
+    matched_rule = None
 
-    for rule in AI_SERVICE_RULES:
-        # Protocol match
-        if rule["proto"] != "*":
-            if rule["proto"] not in proto and not proto.endswith(rule["proto"]):
-                continue
+    # 1) hostname 精确匹配（O(1)）
+    if hostname:
+        rules = _HOSTNAME_INDEX.get(hostname)
+        if rules:
+            for rule in rules:
+                if _proto_match(rule["proto"], proto):
+                    matched_rule = rule
+                    break
+        # 2) hostname 后缀匹配（按长度降序，最长后缀优先）
+        if not matched_rule:
+            for hn in _HOSTNAME_SUFFIX_SORTED:
+                if hostname == hn or hostname.endswith("." + hn):
+                    for rule in _HOSTNAME_INDEX[hn]:
+                        if _proto_match(rule["proto"], proto):
+                            matched_rule = rule
+                            break
+                    if matched_rule:
+                        break
 
-        # Hostname match
-        if rule["hostname"] != "*":
-            if not hostname:
-                continue
-            if hostname != rule["hostname"] and not hostname.endswith("." + rule["hostname"]):
-                continue
+    # 3) proto-only 规则兜底（hostname=="*"）
+    if not matched_rule:
+        for rule in _PROTO_ONLY_RULES:
+            if _proto_match(rule["proto"], proto):
+                matched_rule = rule
+                break
 
-        return {
-            "vendor": rule["vendor"],
-            "service": rule["service"],
-            "svc_type": rule["svc_type"],
-            "color": rule["color"],
-        }
+    if not matched_rule:
+        return None
+    return {
+        "vendor": matched_rule["vendor"],
+        "service": matched_rule["service"],
+        "svc_type": matched_rule["svc_type"],
+        "color": matched_rule["color"],
+    }
 
-    return None
+
+def _proto_match(rule_proto: str, proto: str) -> bool:
+    """proto 是否匹配规则（rule_proto=="*" 恒匹配，否则前缀/包含）。"""
+    if rule_proto == "*":
+        return True
+    return rule_proto in proto or proto.endswith(rule_proto)

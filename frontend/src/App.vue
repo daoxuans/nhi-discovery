@@ -8,7 +8,7 @@ const health = ref<HealthResp | null>(null)
 let timer: number | null = null
 
 const loadHealth = async () => {
-  try { health.value = await getHealth() } catch {}
+  try { health.value = await getHealth() } catch { health.value = null }
 }
 
 const fmtSize = (b: number) => {

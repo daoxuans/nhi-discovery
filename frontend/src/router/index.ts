@@ -14,6 +14,10 @@ const routes = [
     meta: { title: '融合资产', icon: 'Share' } },
 ]
 
-const router = createRouter({ history: createWebHistory(), routes })
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+  scrollBehavior: () => ({ top: 0 }),
+})
 
 export default router

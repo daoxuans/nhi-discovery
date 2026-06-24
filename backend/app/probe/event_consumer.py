@@ -77,7 +77,9 @@ class EventConsumer:
         return self._last_event_at
 
     def _run(self):
+        backoff = 2.0  # 重连退避，指数增长到 60s 上限
         while self._running:
+            connected = False
             try:
                 self._socket = self._ndpisrvd.nDPIsrvdSocket()
                 # 加 JSON filter（必须在 connect 后、loop 前）
@@ -85,6 +87,8 @@ class EventConsumer:
                 logger.info(f"Connecting to nDPIsrvd at {self.socket_path}")
                 self._socket.connect(self.socket_path)
                 self._socket.timeout(5.0)
+                connected = True
+                backoff = 2.0  # 连接成功，重置退避
                 self._socket.loop(self._on_json, self._on_cleanup,
                                   {"db_writer": self.db_writer,
                                    "ai_writer": self.ai_writer})
@@ -102,7 +106,12 @@ class EventConsumer:
                     pass
                 self._socket = None
             if self._running:
-                time.sleep(2)
+                # 连接成功后断开才退避增长；连接失败快速重试后逐步放慢
+                if not connected:
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, 60.0)
+                else:
+                    time.sleep(2)
 
     def _on_json(self, json_dict, instance, current_flow, user_data):
         self._event_count += 1

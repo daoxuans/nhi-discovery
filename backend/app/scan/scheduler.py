@@ -107,8 +107,8 @@ async def _run_incremental_scan(db: Database):
                             version=api_finding.version_detected,
                             models=api_finding.models_detected, source="scan",
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"incremental probe failed {svc['ip']}:{svc['port']}: {type(e).__name__}: {e}")
 
 
 async def _run_cve_rescan(db: Database):
