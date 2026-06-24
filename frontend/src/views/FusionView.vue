@@ -7,16 +7,23 @@ const loading = ref(false)
 const list = ref<FusedAsset[]>([])
 const total = ref(0)
 const source = ref('all')
+const page = ref(1)
+const pageSize = 50
 const scatterEl = ref<HTMLElement>()
 
 const load = async () => {
   loading.value = true
   try {
-    const res = await getFusedAssets({ source: source.value === 'all' ? undefined : source.value, limit: 200 })
+    const res = await getFusedAssets({
+      source: source.value === 'all' ? undefined : source.value,
+      limit: pageSize, offset: (page.value - 1) * pageSize,
+    })
     list.value = res.assets
     total.value = res.total
   } finally { loading.value = false }
 }
+
+const onSourceChange = () => { page.value = 1; load() }
 
 const renderScatter = () => {
   if (!scatterEl.value) return
@@ -55,7 +62,7 @@ onUnmounted(() => {
     <el-card class="mb-12" shadow="never">
       <el-form inline>
         <el-form-item label="数据来源">
-          <el-select v-model="source" style="width: 200px" @change="load">
+          <el-select v-model="source" style="width: 200px" @change="onSourceChange">
             <el-option label="全部 (all)" value="all" />
             <el-option label="双源一致 (both)" value="both" />
             <el-option label="仅 Scan (scan)" value="scan" />
@@ -106,6 +113,10 @@ onUnmounted(() => {
         <el-table-column prop="cve_count" label="CVE" width="60" align="right" />
         <el-table-column prop="scan_last_seen" label="最近扫描" width="160" />
       </el-table>
+      <div v-if="total > 0" style="margin-top: 12px; display: flex; justify-content: flex-end;">
+        <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total"
+          layout="prev, pager, next, total" background @current-change="load" />
+      </div>
     </el-card>
   </div>
 </template>

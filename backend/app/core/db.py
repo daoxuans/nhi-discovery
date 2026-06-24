@@ -6,11 +6,14 @@ scan_targets/scan_tasks/scan_findings/ai_services/cve_records/asset_lifecycle
 """
 
 import json
+import logging
 import sqlite3
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 SCHEMA_SQL = """
@@ -96,6 +99,10 @@ CREATE INDEX IF NOT EXISTS idx_ai_events_agent  ON ai_events(ai_agent);
 CREATE INDEX IF NOT EXISTS idx_ai_events_svc    ON ai_events(ai_service);
 CREATE INDEX IF NOT EXISTS idx_ai_events_time   ON ai_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_ai_events_ip     ON ai_events(src_ip);
+CREATE INDEX IF NOT EXISTS idx_ai_events_time_vendor ON ai_events(created_at, ai_vendor);
+CREATE INDEX IF NOT EXISTS idx_ai_events_vendor_time ON ai_events(ai_vendor, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_events_hostname_notnull ON ai_events(hostname) WHERE hostname IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ai_events_ja4_notnull     ON ai_events(ja4) WHERE ja4 IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS ai_endpoints (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -279,6 +286,7 @@ class Database:
         self._db_path = db_path or settings.db_path
         self._lock = threading.Lock()
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        # 主（写）连接：被 batch 写线程（DbWriter/AiWriter）持有
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
@@ -286,6 +294,11 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+        # 只读连接：API 请求用，与写连接隔离，写线程持写锁时不阻塞读
+        self._read_conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._read_conn.execute("PRAGMA journal_mode=WAL")
+        self._read_conn.execute("PRAGMA query_only=ON")
+        self._read_conn.row_factory = sqlite3.Row
 
     def _init_schema(self):
         with self._lock:
@@ -297,12 +310,18 @@ class Database:
         return self._conn
 
     @property
+    def rconn(self):
+        """只读连接，供 API 读查询使用（与写连接隔离）。"""
+        return self._read_conn
+
+    @property
     def lock(self):
         return self._lock
 
     def close(self):
         with self._lock:
             self._conn.close()
+            self._read_conn.close()
 
     # ──────────────── Sessions ────────────────
 
@@ -395,8 +414,7 @@ class Database:
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = f"SELECT * FROM flows{where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
+        rows = self._read_conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def count_flows(self, session_id=None) -> int:
@@ -404,29 +422,28 @@ class Database:
         params = []
         if session_id:
             sql += " WHERE session_id=?"; params.append(session_id)
-        with self._lock:
-            return self._conn.execute(sql, params).fetchone()[0]
+        return self._read_conn.execute(sql, params).fetchone()[0]
 
     def flow_stats(self) -> Dict:
-        with self._lock:
-            total = self._conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
-            protocols = [dict(r) for r in self._conn.execute(
-                "SELECT proto as name, COUNT(*) as count FROM flows "
-                "WHERE proto IS NOT NULL GROUP BY proto ORDER BY count DESC LIMIT 30"
-            ).fetchall()]
-            categories = [dict(r) for r in self._conn.execute(
-                "SELECT category as name, COUNT(*) as count FROM flows "
-                "WHERE category IS NOT NULL GROUP BY category ORDER BY count DESC LIMIT 20"
-            ).fetchall()]
-            det = self._conn.execute(
-                "SELECT CASE WHEN category IS NOT NULL THEN 'detected' ELSE 'not-detected' END as k, "
-                "COUNT(*) as c FROM flows GROUP BY k"
-            ).fetchall()
-            detection = {r["k"]: r["c"] for r in det}
-            risk_row = self._conn.execute(
-                "SELECT SUM(CASE WHEN risk_count>0 THEN 1 ELSE 0 END) as risky_flows, "
-                "SUM(risk_count) as total_risks FROM flows"
-            ).fetchone()
+        rc = self._read_conn
+        total = rc.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+        protocols = [dict(r) for r in rc.execute(
+            "SELECT proto as name, COUNT(*) as count FROM flows "
+            "WHERE proto IS NOT NULL GROUP BY proto ORDER BY count DESC LIMIT 30"
+        ).fetchall()]
+        categories = [dict(r) for r in rc.execute(
+            "SELECT category as name, COUNT(*) as count FROM flows "
+            "WHERE category IS NOT NULL GROUP BY category ORDER BY count DESC LIMIT 20"
+        ).fetchall()]
+        det = rc.execute(
+            "SELECT CASE WHEN category IS NOT NULL THEN 'detected' ELSE 'not-detected' END as k, "
+            "COUNT(*) as c FROM flows GROUP BY k"
+        ).fetchall()
+        detection = {r["k"]: r["c"] for r in det}
+        risk_row = rc.execute(
+            "SELECT SUM(CASE WHEN risk_count>0 THEN 1 ELSE 0 END) as risky_flows, "
+            "SUM(risk_count) as total_risks FROM flows"
+        ).fetchone()
         return {
             "total": total,
             "protocols": protocols,
@@ -528,51 +545,56 @@ class Database:
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = f"SELECT * FROM ai_events{where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
+        # 读查询用只读连接，不被写线程阻塞
+        rows = self._read_conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def count_ai_events(self, ai_agent=None, ai_vendor=None,
                         ai_service=None, src_ip=None) -> int:
         conditions, params = self._ai_event_filter(ai_agent, ai_vendor, ai_service, src_ip)
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
-        with self._lock:
-            return self._conn.execute(f"SELECT COUNT(*) FROM ai_events{where}", params).fetchone()[0]
+        return self._read_conn.execute(f"SELECT COUNT(*) FROM ai_events{where}", params).fetchone()[0]
 
     def ai_events_stats(self, time_range="all") -> Dict:
-        cond = ""
+        """统计聚合。合并为少量查询 + 用只读连接，避免被写线程阻塞。
+
+        时间过滤 + confirmed 过滤利用 idx_ai_events_time_vendor 复合索引，
+        不再逐列 GROUP BY 各扫一次全表。
+        """
         if time_range == "1h":
-            cond = " WHERE created_at >= datetime('now','-1 hour')"
+            time_cond = "created_at >= datetime('now','-1 hour')"
         elif time_range == "24h":
-            cond = " WHERE created_at >= datetime('now','-1 day')"
+            time_cond = "created_at >= datetime('now','-1 day')"
         elif time_range == "7d":
-            cond = " WHERE created_at >= datetime('now','-7 days')"
-        joiner = "AND" if cond else "WHERE"
+            time_cond = "created_at >= datetime('now','-7 days')"
+        else:
+            time_cond = None
+
+        base = f"FROM ai_events WHERE {time_cond}" if time_cond else "FROM ai_events"
+        confirmed_base = f"{base} {'AND' if time_cond else 'WHERE'} ai_vendor IS NOT NULL"
+
+        rc = self._read_conn
+        # total + confirmed 合并为一次扫描
+        row = rc.execute(
+            f"SELECT COUNT(*), SUM(CASE WHEN ai_vendor IS NOT NULL THEN 1 ELSE 0 END) {base}"
+        ).fetchone()
+        total, confirmed = row[0], row[1] or 0
+        flows_total = rc.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+        top_ja4 = [dict(r) for r in rc.execute(
+            f"SELECT ja4, COUNT(*) as count {confirmed_base} "
+            f"AND ja4 IS NOT NULL AND ja4 != '' GROUP BY ja4 ORDER BY count DESC LIMIT 10"
+        ).fetchall()]
+        top_hostnames = [dict(r) for r in rc.execute(
+            f"SELECT hostname, COUNT(*) as count {confirmed_base} "
+            f"AND hostname IS NOT NULL AND hostname != '' GROUP BY hostname ORDER BY count DESC LIMIT 10"
+        ).fetchall()]
 
         def _grp(col):
-            sql = (f"SELECT {col} as name, COUNT(*) as count FROM ai_events "
-                   f"{cond} {joiner if cond else ''} {col} IS NOT NULL GROUP BY {col} ORDER BY count DESC").replace("  ", " ")
-            with self._lock:
-                return {r["name"]: r["count"] for r in self._conn.execute(sql).fetchall()}
+            col_base = f"FROM ai_events WHERE {time_cond} AND {col} IS NOT NULL" if time_cond \
+                       else f"FROM ai_events WHERE {col} IS NOT NULL"
+            return {r["name"]: r["count"]
+                    for r in rc.execute(f"SELECT {col} as name, COUNT(*) as count {col_base} GROUP BY {col} ORDER BY count DESC").fetchall()}
 
-        # percentage 口径修正：只用"确认的 AI 事件"（ai_vendor 非 NULL）算占比，
-        # 避免路径B去门控后大量未命中规则的 detected 事件虚高占比
-        # top_ja4/top_hostnames 也只统计 confirmed，避免非 AI 域名（如 aq.ruijie）霸榜
-        with self._lock:
-            total = self._conn.execute(f"SELECT COUNT(*) FROM ai_events{cond}").fetchone()[0]
-            confirmed_cond = f"{cond} {'AND' if cond else 'WHERE'} ai_vendor IS NOT NULL"
-            confirmed = self._conn.execute(
-                f"SELECT COUNT(*) FROM ai_events {confirmed_cond}"
-            ).fetchone()[0]
-            flows_total = self._conn.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
-            top_ja4 = [dict(r) for r in self._conn.execute(
-                f"SELECT ja4, COUNT(*) as count FROM ai_events {confirmed_cond} "
-                f"AND ja4 IS NOT NULL AND ja4 != '' GROUP BY ja4 ORDER BY count DESC LIMIT 10"
-            ).fetchall()]
-            top_hostnames = [dict(r) for r in self._conn.execute(
-                f"SELECT hostname, COUNT(*) as count FROM ai_events {confirmed_cond} "
-                f"AND hostname IS NOT NULL AND hostname != '' GROUP BY hostname ORDER BY count DESC LIMIT 10"
-            ).fetchall()]
         percentage = round(confirmed / flows_total * 100, 2) if flows_total else 0.0
         return {
             "total": total,
@@ -668,9 +690,19 @@ class Database:
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = f"SELECT * FROM ai_endpoints{where} ORDER BY flow_count DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
+        rows = self._read_conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    def count_ai_endpoints(self, role=None, ip=None, name=None) -> int:
+        conditions, params = [], []
+        if role:
+            conditions.append("role=?"); params.append(role)
+        if ip:
+            conditions.append("ip=?"); params.append(ip)
+        if name:
+            conditions.append("name LIKE ?"); params.append(f"%{name}%")
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        return self._read_conn.execute(f"SELECT COUNT(*) FROM ai_endpoints{where}", params).fetchone()[0]
 
     def get_ai_endpoint(self, ip: str) -> Dict:
         with self._lock:
@@ -827,9 +859,17 @@ class Database:
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = f"SELECT * FROM scan_findings{where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
+        rows = self._read_conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    def count_scan_findings(self, ip=None, service=None, port=None, task_id=None) -> int:
+        conditions, params = [], []
+        if ip: conditions.append("ip=?"); params.append(ip)
+        if service: conditions.append("ai_service LIKE ?"); params.append(f"%{service}%")
+        if port: conditions.append("port=?"); params.append(port)
+        if task_id: conditions.append("task_id=?"); params.append(task_id)
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        return self._read_conn.execute(f"SELECT COUNT(*) FROM scan_findings{where}", params).fetchone()[0]
 
     # ──────────────── Scan: ai_services UPSERT ────────────────
 
@@ -898,9 +938,17 @@ class Database:
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = f"SELECT * FROM ai_services{where} ORDER BY scan_count DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
+        rows = self._read_conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    def count_ai_services(self, vendor=None, svc_type=None, ip=None, lifecycle_state=None) -> int:
+        conditions, params = [], []
+        if vendor: conditions.append("vendor=?"); params.append(vendor)
+        if svc_type: conditions.append("svc_type=?"); params.append(svc_type)
+        if ip: conditions.append("ip=?"); params.append(ip)
+        if lifecycle_state: conditions.append("lifecycle_state=?"); params.append(lifecycle_state)
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        return self._read_conn.execute(f"SELECT COUNT(*) FROM ai_services{where}", params).fetchone()[0]
 
     def list_ai_service_ips(self) -> List[Dict]:
         """Scan 融合用：取所有 ai_services 的 ip/port/service/version。"""
@@ -993,9 +1041,15 @@ class Database:
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = f"SELECT * FROM cve_records{where} ORDER BY cvss_score DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
+        rows = self._read_conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    def count_cves(self, service=None, severity=None) -> int:
+        conditions, params = [], []
+        if service: conditions.append("service=?"); params.append(service)
+        if severity: conditions.append("severity=?"); params.append(severity)
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        return self._read_conn.execute(f"SELECT COUNT(*) FROM cve_records{where}", params).fetchone()[0]
 
     def list_all_cves(self) -> List[Dict]:
         with self._lock:
@@ -1060,12 +1114,12 @@ class Database:
                   ORDER BY s.fused_confidence DESC NULLS LAST, s.risk_level, s.scan_count DESC
                   LIMIT ? OFFSET ?"""
         list_params = params + [limit, offset]
-        with self._lock:
-            rows = self._conn.execute(sql, list_params).fetchall()
-            total = self._conn.execute(
-                f"SELECT COUNT(*) FROM ai_services s LEFT JOIN ai_endpoints e "
-                f"ON s.ip=e.ip AND e.role='service' {where}", params
-            ).fetchone()[0]
+        rc = self._read_conn
+        rows = rc.execute(sql, list_params).fetchall()
+        total = rc.execute(
+            f"SELECT COUNT(*) FROM ai_services s LEFT JOIN ai_endpoints e "
+            f"ON s.ip=e.ip AND e.role='service' {where}", params
+        ).fetchone()[0]
         return {"assets": [dict(r) for r in rows], "total": total}
 
     # ──────────────── 表行数（health 用）────────────────
@@ -1075,12 +1129,13 @@ class Database:
                   "scan_tasks", "scan_findings", "ai_services", "cve_records",
                   "asset_lifecycle"]
         result = {}
-        with self._lock:
-            for t in tables:
-                try:
-                    result[t] = self._conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                except Exception:
-                    result[t] = 0
+        rc = self._read_conn
+        for t in tables:
+            try:
+                result[t] = rc.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except Exception as e:
+                logger.warning(f"table_counts {t} failed: {e}")
+                result[t] = 0
         return result
 
     def db_file_size(self) -> int:

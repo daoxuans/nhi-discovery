@@ -90,25 +90,36 @@ const toggleEnabled = async (t: ScanTarget) => {
 
 // ── 任务列表 ──
 const tasks = ref<ScanTask[]>([])
-const loadTasks = async () => { try { tasks.value = (await listScanTasks(30)).tasks } catch {} }
+const taskPage = ref(1)
+const taskTotal = ref(0)
+const loadTasks = async () => { try { const r = await listScanTasks(100, (taskPage.value - 1) * 100); tasks.value = r.tasks; taskTotal.value = r.total ?? r.tasks.length } catch {} }
 const statusTag = (s: string) => s === 'done' ? 'success' : s === 'failed' ? 'danger' : s === 'running' ? 'warning' : 'info'
 
 // ── 发现明细 ──
 const findings = ref<ScanFinding[]>([])
 const findingsTaskId = ref<string>('')
+const findingsPage = ref(1)
+const findingsTotal = ref(0)
 const loadFindings = async () => {
   const taskId = findingsTaskId.value ? Number(findingsTaskId.value) : undefined
-  try { findings.value = (await getScanFindings({ task_id: taskId, limit: 100 })).findings } catch {}
+  try {
+    const r = await getScanFindings({ task_id: taskId, limit: 50, offset: (findingsPage.value - 1) * 50 })
+    findings.value = r.findings; findingsTotal.value = r.total
+  } catch {}
 }
 
 // ── 服务资产 ──
 const services = ref<AiService[]>([])
-const loadServices = async () => { try { services.value = (await listScanServices({ limit: 200 })).services } catch {} }
+const svcPage = ref(1)
+const svcTotal = ref(0)
+const loadServices = async () => { try { const r = await listScanServices({ limit: 50, offset: (svcPage.value - 1) * 50 }); services.value = r.services; svcTotal.value = r.total } catch {} }
 const riskTag = (r: string | null) => r === 'high' ? 'danger' : r === 'medium' ? 'warning' : r === 'low' ? 'success' : 'info'
 
 // ── CVE ──
 const cves = ref<CveRecord[]>([])
-const loadCves = async () => { try { cves.value = (await listScanCves({ limit: 50 })).cves } catch {} }
+const cvePage = ref(1)
+const cveTotal = ref(0)
+const loadCves = async () => { try { const r = await listScanCves({ limit: 50, offset: (cvePage.value - 1) * 50 }); cves.value = r.cves; cveTotal.value = r.total } catch {} }
 const cveTag = (s: string) => s === 'critical' ? 'danger' : s === 'high' ? 'danger' : s === 'medium' ? 'warning' : 'info'
 
 onMounted(() => { loadTargets(); loadTasks(); loadFindings(); loadServices(); loadCves() })
@@ -219,13 +230,15 @@ onMounted(() => { loadTargets(); loadTasks(); loadFindings(); loadServices(); lo
         <el-table-column prop="finished_at" label="结束" width="160" />
         <el-table-column prop="error_msg" label="错误" show-overflow-tooltip />
       </el-table>
+      <el-pagination v-if="taskTotal > 0" v-model:current-page="taskPage" :page-size="100" :total="taskTotal"
+        layout="prev, pager, next, total" background class="mt-12" @current-change="loadTasks" />
     </el-tab-pane>
 
     <!-- 发现明细 -->
     <el-tab-pane label="扫描发现" name="findings">
       <div class="mb-12">
         <el-input v-model="findingsTaskId" placeholder="task_id 过滤" style="width: 140px" />
-        <el-button @click="loadFindings">查询</el-button>
+        <el-button @click="() => { findingsPage = 1; loadFindings() }">查询</el-button>
       </div>
       <el-table :data="findings" stripe size="small" max-height="560">
         <el-table-column prop="ip" label="IP" width="140" />
@@ -239,6 +252,8 @@ onMounted(() => { loadTargets(); loadTasks(); loadFindings(); loadServices(); lo
         <el-table-column prop="confidence" label="置信度" width="80" align="right" />
         <el-table-column prop="found_at" label="发现时间" width="160" />
       </el-table>
+      <el-pagination v-if="findingsTotal > 0" v-model:current-page="findingsPage" :page-size="50" :total="findingsTotal"
+        layout="prev, pager, next, total" background class="mt-12" @current-change="loadFindings" />
     </el-tab-pane>
 
     <!-- 服务资产 -->
@@ -253,7 +268,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadFindings(); loadServices(); lo
         <el-table-column prop="scan_count" label="扫描次数" width="90" align="right" />
         <el-table-column label="Probe融合" width="100">
           <template #default="{ row }">
-            <el-tag v-if="row.probe_seen" type="warning" size="small">{{ row.fused_confidence }}</el-tag>
+            <el-tag v-if="row.probe_seen" type="warning" size="small">{{ row.fused_confidence != null ? Number(row.fused_confidence).toFixed(2) : '-' }}</el-tag>
             <span v-else style="color:#c0c4cc">未融合</span>
           </template>
         </el-table-column>
@@ -262,6 +277,8 @@ onMounted(() => { loadTargets(); loadTasks(); loadFindings(); loadServices(); lo
         </el-table-column>
         <el-table-column prop="cve_count" label="CVE数" width="70" align="right" />
       </el-table>
+      <el-pagination v-if="svcTotal > 0" v-model:current-page="svcPage" :page-size="50" :total="svcTotal"
+        layout="prev, pager, next, total" background class="mt-12" @current-change="loadServices" />
     </el-tab-pane>
 
     <!-- CVE -->
@@ -277,6 +294,8 @@ onMounted(() => { loadTargets(); loadTasks(); loadFindings(); loadServices(); lo
         <el-table-column prop="cvss_score" label="CVSS" width="70" align="right" />
         <el-table-column prop="description" label="描述" show-overflow-tooltip />
       </el-table>
+      <el-pagination v-if="cveTotal > 0" v-model:current-page="cvePage" :page-size="50" :total="cveTotal"
+        layout="prev, pager, next, total" background class="mt-12" @current-change="loadCves" />
     </el-tab-pane>
   </el-tabs>
 </template>

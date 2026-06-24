@@ -170,6 +170,12 @@ class AiWriter:
             # Layer 2: AI Agent 推断
             agent = infer_agent(ndpi)
 
+            # 数据质量门控：svc 和 agent 都为 None 时，该流不是 AI 流量，
+            # 不写 ai_events（避免非 AI 的 detected 事件污染占比，AI 占比从虚高回到真实水平）。
+            # 原始流量仍由 DbWriter 写入 flows 表保留。
+            if not svc and not agent:
+                return
+
             # 组装 ai_events 行
             confidence_raw = ndpi.get("confidence", {})
             if isinstance(confidence_raw, dict):

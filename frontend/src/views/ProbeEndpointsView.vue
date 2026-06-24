@@ -19,12 +19,15 @@ const load = async () => {
   loading.value = true
   try {
     const res = await getAiEndpoints({
-      role: role.value || undefined, name: keyword.value || undefined, limit: 200,
+      role: role.value || undefined, name: keyword.value || undefined,
+      limit: pageSize, offset: (page.value - 1) * pageSize,
     })
     list.value = res.endpoints
     total.value = res.total
   } finally { loading.value = false }
 }
+
+const onFilterChange = () => { page.value = 1; load() }
 
 const categoryTag = (cat: string | null) => {
   const map: Record<string, string> = {
@@ -48,16 +51,16 @@ onMounted(load)
     <el-card class="mb-12" shadow="never">
       <el-form inline>
         <el-form-item label="角色">
-          <el-select v-model="role" placeholder="全部" clearable style="width: 140px" @change="load">
+          <el-select v-model="role" placeholder="全部" clearable style="width: 140px" @change="onFilterChange">
             <el-option label="客户端 (agent)" value="agent" />
             <el-option label="服务端 (service)" value="service" />
           </el-select>
         </el-form-item>
         <el-form-item label="名称">
-          <el-input v-model="keyword" placeholder="如 Claude Code" clearable style="width: 200px" @keyup.enter="load" @clear="load" />
+          <el-input v-model="keyword" placeholder="如 Claude Code" clearable style="width: 200px" @keyup.enter="onFilterChange" @clear="onFilterChange" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="load">查询</el-button>
+          <el-button type="primary" @click="onFilterChange">查询</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -98,7 +101,11 @@ onMounted(load)
         </el-table-column>
       </el-table>
       </div>
-      <div style="margin-top: 12px; color: #909399; font-size: 13px;">显示 {{ list.length }} / {{ total }} 个端点，点击行查看端点画像</div>
+      <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="color: #909399; font-size: 13px;">共 {{ total }} 个端点，点击行查看端点画像</span>
+        <el-pagination v-model:current-page="page" :page-size="pageSize" :total="total"
+          layout="prev, pager, next, total" background @current-change="load" />
+      </div>
     </el-card>
   </div>
 </template>

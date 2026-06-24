@@ -61,13 +61,15 @@ async def get_scan_task(request: Request, task_id: int):
 
 
 @router.get("/tasks")
-async def list_scan_tasks(request: Request, limit: int = Query(20, ge=1, le=100)):
+async def list_scan_tasks(request: Request, limit: int = Query(20, ge=1, le=100),
+                          offset: int = Query(0, ge=0)):
     db = _get_db(request)
     with db.lock:
         rows = db.conn.execute(
-            "SELECT * FROM scan_tasks ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM scan_tasks ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)
         ).fetchall()
-    return {"tasks": [dict(r) for r in rows]}
+        total = db.conn.execute("SELECT COUNT(*) FROM scan_tasks").fetchone()[0]
+    return {"tasks": [dict(r) for r in rows], "total": total}
 
 
 @router.get("/findings")
@@ -85,7 +87,8 @@ async def list_scan_findings(
         ip=ip, service=service, port=port, task_id=task_id,
         limit=limit, offset=offset,
     )
-    return {"findings": findings, "total": len(findings)}
+    total = db.count_scan_findings(ip=ip, service=service, port=port, task_id=task_id)
+    return {"findings": findings, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/services")
@@ -96,13 +99,16 @@ async def list_scan_services(
     ip: str = Query(None),
     lifecycle_state: str = Query(None),
     limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     db = _get_db(request)
     services = db.list_ai_services(
         vendor=vendor, svc_type=svc_type, ip=ip,
-        lifecycle_state=lifecycle_state, limit=limit,
+        lifecycle_state=lifecycle_state, limit=limit, offset=offset,
     )
-    return {"services": services, "total": len(services)}
+    total = db.count_ai_services(vendor=vendor, svc_type=svc_type, ip=ip,
+                                 lifecycle_state=lifecycle_state)
+    return {"services": services, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/cve")
@@ -111,10 +117,12 @@ async def list_scan_cves(
     service: str = Query(None),
     severity: str = Query(None),
     limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     db = _get_db(request)
-    cves = db.search_cves(service=service, severity=severity, limit=limit)
-    return {"cves": cves, "total": len(cves)}
+    cves = db.search_cves(service=service, severity=severity, limit=limit, offset=offset)
+    total = db.count_cves(service=service, severity=severity)
+    return {"cves": cves, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/targets")

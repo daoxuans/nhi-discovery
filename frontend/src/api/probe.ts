@@ -46,7 +46,7 @@ export interface AiEndpoint {
 }
 
 export const getAiEndpoints = (params: {
-  role?: string; ip?: string; name?: string; limit?: number
+  role?: string; ip?: string; name?: string; limit?: number; offset?: number
 }) => http.get<unknown, { endpoints: AiEndpoint[]; total: number }>('/ai/endpoints', { params })
 
 export const getAiEndpoint = (ip: string) => http.get<unknown, any>(`/ai/endpoint/${ip}`)

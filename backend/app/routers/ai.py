@@ -51,10 +51,12 @@ async def list_ai_endpoints(
     ip: str = Query(None),
     name: str = Query(None),
     limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     db = _get_db(request)
-    endpoints = db.list_ai_endpoints(role=role, ip=ip, name=name, limit=limit)
-    return {"endpoints": endpoints, "total": len(endpoints)}
+    endpoints = db.list_ai_endpoints(role=role, ip=ip, name=name, limit=limit, offset=offset)
+    total = db.count_ai_endpoints(role=role, ip=ip, name=name)
+    return {"endpoints": endpoints, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/endpoint/{ip}")

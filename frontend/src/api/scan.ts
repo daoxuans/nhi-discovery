@@ -100,8 +100,8 @@ export const deleteScanTarget = (id: number) =>
 // ── 任务/发现/服务/CVE 查询 ──
 export const getScanTask = (id: number) => http.get<unknown, ScanTask>(`/scan/task/${id}`)
 
-export const listScanTasks = (limit = 20) =>
-  http.get<unknown, { tasks: ScanTask[] }>('/scan/tasks', { params: { limit } })
+export const listScanTasks = (limit = 20, offset = 0) =>
+  http.get<unknown, { tasks: ScanTask[]; total?: number }>('/scan/tasks', { params: { limit, offset } })
 
 export const getScanFindings = (params: {
   ip?: string; service?: string; port?: number; task_id?: number;
@@ -109,8 +109,8 @@ export const getScanFindings = (params: {
 }) => http.get<unknown, { findings: ScanFinding[]; total: number }>('/scan/findings', { params })
 
 export const listScanServices = (params: {
-  vendor?: string; svc_type?: string; ip?: string; lifecycle_state?: string; limit?: number
+  vendor?: string; svc_type?: string; ip?: string; lifecycle_state?: string; limit?: number; offset?: number
 }) => http.get<unknown, { services: AiService[]; total: number }>('/scan/services', { params })
 
-export const listScanCves = (params: { service?: string; severity?: string; limit?: number }) =>
+export const listScanCves = (params: { service?: string; severity?: string; limit?: number; offset?: number }) =>
   http.get<unknown, { cves: CveRecord[]; total: number }>('/scan/cve', { params })

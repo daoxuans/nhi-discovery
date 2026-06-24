@@ -81,7 +81,7 @@ async def _run_full_scan(db: Database):
             task_id, _, cidr, tgt = create_scan_task(db, target["id"], None, "full")
             await run_scan_with_taskid(db, task_id, tgt, cidr, "full")
             correlate_scan_results(db, task_id)
-            _mark_misses(db, task_id)
+            _mark_misses(db, task_id, cidr)
         except Exception as e:
             logger.error(f"full scan target {target['name']} failed: {e}", exc_info=True)
 
@@ -125,14 +125,48 @@ async def _run_cve_rescan(db: Database):
             )
 
 
-def _mark_misses(db: Database, task_id: int):
-    """本轮未发现的已知 ai_services → miss_count += 1。"""
+def _mark_misses(db: Database, task_id: int, cidr: str = None):
+    """本轮未发现的已知 ai_services → miss_count += 1。
+
+    关键修复：只标记落在本轮扫描 CIDR 范围内的服务。旧实现无脑标记所有
+    active 服务，导致每个网段扫描后全网段服务都 +1 miss，~15 分钟内全部
+    误判为 dormant。
+    """
     from app.core.asset_model import record_miss
-    # 简化：对本轮 scan_findings 之外的同网段 ai_services 标记 miss
-    # 实际生产可按 IP 集合差集精确判定
+    import ipaddress
+
+    # 取本轮 scan_findings 命中的 IP 集合（命中即不算 miss）
+    with db.lock:
+        found_rows = db.conn.execute(
+            "SELECT DISTINCT ip FROM scan_findings WHERE task_id=?", (task_id,)
+        ).fetchall()
+    found_ips = {r["ip"] for r in found_rows}
+
+    # 只考虑本轮扫描 CIDR 范围内的 active 服务
+    networks = []
+    if cidr:
+        for part in str(cidr).replace(",", " ").split():
+            try:
+                networks.append(ipaddress.ip_network(part, strict=False))
+            except ValueError:
+                pass
+
     with db.lock:
         rows = db.conn.execute(
             "SELECT ip, port, service FROM ai_services WHERE lifecycle_state='active'"
         ).fetchall()
+
     for r in rows:
-        record_miss(db, r["ip"], r["port"], r["service"])
+        ip = r["ip"]
+        # 若指定了 CIDR，只处理落在范围内的 IP；范围外本轮根本没扫，不应计 miss
+        if networks:
+            try:
+                ip_obj = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if not any(ip_obj in net for net in networks):
+                continue
+        # 命中的不算 miss
+        if ip in found_ips:
+            continue
+        record_miss(db, ip, r["port"], r["service"])
