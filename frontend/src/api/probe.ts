@@ -7,10 +7,14 @@ export interface HealthResp {
   probe_consumer: string
   probe_event_count: number
   db_writer_queue_depth: number
+  ai_writer_queue_depth?: number
+  ai_writer_written?: number
+  ai_writer_dropped?: number
   scan_scheduler: string
 }
 
-export const getHealth = () => http.get<unknown, HealthResp>('/health')
+// silent=true：高频轮询专用，失败不弹全局错误 toast（避免后端重启时每 10s 弹一次，F9）
+export const getHealth = () => http.get<unknown, HealthResp>('/health', { silent: true } as any)
 
 export interface AiStatsResp {
   total: number

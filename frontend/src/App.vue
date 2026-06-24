@@ -52,6 +52,10 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
           <span>DB {{ fmtSize(health.db_size_bytes) }}</span>
           <span>flows {{ health.tables?.flows ?? '-' }}</span>
         </div>
+        <!-- 后端不可达时显示 disconnected 状态，而非显示过期绿标（F7/F9） -->
+        <div v-else class="nhi-health-bar">
+          <el-tag type="danger" size="small">后端未连接</el-tag>
+        </div>
       </el-header>
 
       <el-main class="nhi-main">
