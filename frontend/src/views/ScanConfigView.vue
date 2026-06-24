@@ -109,8 +109,10 @@ const loadTasks = async () => {
 const onTaskFilterChange = () => { taskPage.value = 1; loadTasks() }
 const statusTag = (s: string) => s === 'done' ? 'success' : s === 'failed' ? 'danger' : s === 'running' ? 'warning' : 'info'
 
-// ── 任务详情（扫描发现） ──
 const activeTab = ref('trigger')
+
+// ── 任务详情弹窗 ──
+const detailVisible = ref(false)
 const detailTaskId = ref<number | null>(null)
 const detailTaskLabel = ref('')
 const findings = ref<ScanFinding[]>([])
@@ -121,11 +123,9 @@ const findingsPage = ref(1)
 const openTaskDetail = async (task: ScanTask) => {
   detailTaskId.value = task.id
   detailTaskLabel.value = `任务 #${task.id} (${task.task_type}, ${task.status})`
-  try {
-    findingsPage.value = 1
-    await loadFindings()
-  } catch {}
-  activeTab.value = 'taskdetail'
+  findingsPage.value = 1
+  detailVisible.value = true
+  await loadFindings()
 }
 
 const loadFindings = async () => {
@@ -134,14 +134,7 @@ const loadFindings = async () => {
   try {
     const r = await getScanFindings({ task_id: detailTaskId.value, limit: 50, offset: (findingsPage.value - 1) * 50 })
     findings.value = r.findings; findingsTotal.value = r.total
-  } finally { findingsLoading.value = false }
-}
-
-const fmtConfidence = (c: number | null) => {
-  if (c === null) return '-'
-  if (c >= 0.9) return '高'
-  if (c >= 0.7) return '中'
-  return '低'
+  } catch {} finally { findingsLoading.value = false }
 }
 
 onMounted(() => { loadTargets(); loadTasks() })
@@ -272,11 +265,8 @@ onMounted(() => { loadTargets(); loadTasks() })
         layout="prev, pager, next, total" background class="mt-12" @current-change="loadTasks" />
     </el-tab-pane>
 
-    <!-- 扫描任务详情（发现明细） -->
-    <el-tab-pane v-if="detailTaskId != null" label="任务详情" name="taskdetail">
-      <el-page-header @back="() => activeTab = 'tasks'" style="margin-bottom: 16px;">
-        <template #content>{{ detailTaskLabel }}</template>
-      </el-page-header>
+    <!-- 任务详情弹窗 -->
+    <el-dialog v-model="detailVisible" :title="detailTaskLabel" width="1100px" top="4vh">
       <div style="overflow-x: auto;">
       <el-table :data="findings" stripe size="small" max-height="560" v-loading="findingsLoading" style="min-width: 1060px;">
         <el-table-column prop="ip" label="IP" width="140" />
@@ -300,6 +290,6 @@ onMounted(() => { loadTargets(); loadTasks() })
       </div>
       <el-pagination v-if="findingsTotal > 0" v-model:current-page="findingsPage" :page-size="50" :total="findingsTotal"
         layout="prev, pager, next, total" background class="mt-12" @current-change="loadFindings" />
-    </el-tab-pane>
+    </el-dialog>
   </el-tabs>
 </template>
