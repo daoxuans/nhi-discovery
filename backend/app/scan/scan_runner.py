@@ -22,7 +22,7 @@ from app.core.db import Database, now_cst
 from app.scan.rate_limiter import GlobalRateLimiter, PerTargetRateLimiter
 from app.scan.workers.port_prober import probe_ports, PortFinding, AI_PORTS, WEB_PORTS
 from app.scan.workers.api_prober import probe_api, ApiFinding, PORT_API_MAP
-from app.scan.workers.web_fingerprinter import fingerprint_web, WebFinding, WEB_PORTS as WEB_FP_PORTS
+from app.scan.workers.web_fingerprinter import fingerprint_web, WebFinding
 from app.scan.workers.container_prober import probe_container, ContainerFinding
 from app.scan.workers.version_extractor import extract_version, correlate_cve
 
@@ -91,7 +91,10 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
         elif scan_strategy == "web_only":
             ports = WEB_PORTS
         else:
-            ports = list(set(AI_PORTS + WEB_PORTS))
+            # full：AI默认端口 + web端口 + 常见 agent 自定义端口区间
+            # 配合 web_fingerprinter 内容指纹，发现非标准端口部署的 agent
+            from app.scan.workers.port_prober import FULL_PORTS
+            ports = FULL_PORTS
 
         port_findings: List[PortFinding] = await probe_ports(
             cidr, ports, rate_pps, timeout=settings.scan_port_timeout, nmap_timing=nmap_T
@@ -154,7 +157,10 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
                                     "models": api_finding.models_detected,
                                 })
 
-                    if pf.port in WEB_FP_PORTS and not (api_finding and api_finding.vendor):
+                    # 内容指纹：对所有 web 开放端口做指纹识别（不限于 WEB_PORTS）。
+                    # 关键：AI agent 端口常自定义，靠内容（title/全局变量/CSP）识别而非端口归属。
+                    # 仅当 API 探测未确认（无 vendor）时才做 web 指纹，避免重复。
+                    if not (api_finding and api_finding.vendor):
                         web_finding = await fingerprint_web(session, pf.ip, pf.port, api_timeout)
                         if web_finding:
                             finding_dict.update({

@@ -14,8 +14,35 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 # AI 框架默认端口 + 常见 Web 端口
-AI_PORTS = [11434, 8000, 8001, 8080, 12345, 80, 443, 3000, 5001, 5678, 2375, 2376, 6443]
-WEB_PORTS = [80, 443, 3000, 5001, 8000, 8080, 8443]
+# 设计原则：AI agent 端口常被用户自定义（如 1Panel 随机分配），固定列表不可靠。
+# - AI_PORTS: 仅列"高置信度默认端口"（AI 框架出厂默认值），用于 ai_ports_only 快速探测。
+#   不含 80/443/3000/8000/8080 等通用 web 端口（那些走 web_only / full）。
+# - 发现自定义端口的 AI agent 靠 full 策略全端口扫描 + web_fingerprinter 内容指纹。
+# - 同时在 full 策略里扩展常见 AI 端口，避免漏扫已知框架。
+AI_PORTS = [
+    11434,   # Ollama
+    7860,    # Gradio
+    8501,    # Streamlit
+    8001,    # Triton
+    12345,   # LM Studio
+    9000,    # TGI (Text Generation Inference)
+    5000,    # 常见 LLM 推理 (Flask/Gunicorn/MLflow)
+    8265,    # Ray Dashboard
+    19530,   # Milvus 向量库
+    6333,    # Qdrant 向量库
+]
+# WEB_PORTS：通用 web 端口，web_only 策略用；web_fingerprinter 对这些端口做内容指纹
+WEB_PORTS = [80, 443, 3000, 5001, 8000, 8080, 8443, 8888]
+# FULL_PORTS：full 策略扫描的端口集合 = AI 默认端口 + web 端口 + 更多可能部署 agent 的端口
+# 覆盖常见自定义 agent 部署区间，配合内容指纹发现非标准端口 agent
+FULL_PORTS = sorted(set(
+    AI_PORTS
+    + WEB_PORTS
+    + [5678, 8888, 9119, 9120, 18789, 18791,   # 已知 agent 自定义端口区间
+       8889, 9999, 11434, 8000, 8001, 8080,     # 备用
+       7860, 7861, 8501, 8502,                  # Gradio/Streamlit 备用
+       2375, 2376, 6443, 10250, 16443]          # 容器/K8s（探测未授权）
+))
 
 
 @dataclass
