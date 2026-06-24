@@ -24,7 +24,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 </script>
 
 <template>
-  <el-container style="height: 100%; overflow: hidden">
+  <el-container style="height: 100%">
     <el-aside width="216px" class="nhi-sidebar">
       <div class="nhi-logo">
         <div class="nhi-logo-icon">N</div>
