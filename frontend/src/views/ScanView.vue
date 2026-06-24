@@ -24,7 +24,7 @@ const doTrigger = async () => {
     })
     ElMessage.success(`扫描已触发，task_id=${res.task_id}`)
     activeTab.value = 'tasks'
-    loadTasks()
+    loadTasks(fetchTasks)
   } finally { triggering.value = false }
 }
 
@@ -88,11 +88,38 @@ const toggleEnabled = async (t: ScanTarget) => {
   }
 }
 
+// 通用请求世代防护：防止分页快速翻页时旧响应覆盖新数据（F2）
+// 每个 list 一个独立世代计数器 + AbortController
+function makeLoader<T>(apply: (data: T) => void) {
+  let gen = 0
+  let inflight: AbortController | null = null
+  return async (fetcher: (signal: AbortSignal) => Promise<T>) => {
+    const g = ++gen
+    if (inflight) inflight.abort()
+    const ac = new AbortController()
+    inflight = ac
+    try {
+      const data = await fetcher(ac.signal)
+      if (g !== gen) return  // 过期响应丢弃
+      apply(data)
+    } catch (e: any) {
+      if (e?.name === 'CanceledError' || ac.signal.aborted) return
+      throw e
+    } finally {
+      if (inflight === ac) inflight = null
+    }
+  }
+}
+
 // ── 任务列表 ──
 const tasks = ref<ScanTask[]>([])
 const taskPage = ref(1)
 const taskTotal = ref(0)
-const loadTasks = async () => { try { const r = await listScanTasks(100, (taskPage.value - 1) * 100); tasks.value = r.tasks; taskTotal.value = r.total ?? r.tasks.length } catch {} }
+const loadTasks = makeLoader((r: { tasks: ScanTask[]; total?: number }) => {
+  tasks.value = r.tasks; taskTotal.value = r.total ?? r.tasks.length
+})
+const fetchTasks = (signal: AbortSignal) =>
+  listScanTasks(100, (taskPage.value - 1) * 100, signal)
 const statusTag = (s: string) => s === 'done' ? 'success' : s === 'failed' ? 'danger' : s === 'running' ? 'warning' : 'info'
 
 // ── 发现明细 ──
@@ -114,17 +141,25 @@ const loadFindings = async () => {
 const services = ref<AiService[]>([])
 const svcPage = ref(1)
 const svcTotal = ref(0)
-const loadServices = async () => { try { const r = await listScanServices({ limit: 50, offset: (svcPage.value - 1) * 50 }); services.value = r.services; svcTotal.value = r.total } catch {} }
+const loadServices = makeLoader((r: { services: AiService[]; total: number }) => {
+  services.value = r.services; svcTotal.value = r.total
+})
+const fetchServices = (signal: AbortSignal) =>
+  listScanServices({ limit: 50, offset: (svcPage.value - 1) * 50 }, signal)
 const riskTag = (r: string | null) => r === 'high' ? 'danger' : r === 'medium' ? 'warning' : r === 'low' ? 'success' : 'info'
 
 // ── CVE ──
 const cves = ref<CveRecord[]>([])
 const cvePage = ref(1)
 const cveTotal = ref(0)
-const loadCves = async () => { try { const r = await listScanCves({ limit: 50, offset: (cvePage.value - 1) * 50 }); cves.value = r.cves; cveTotal.value = r.total } catch {} }
+const loadCves = makeLoader((r: { cves: CveRecord[]; total: number }) => {
+  cves.value = r.cves; cveTotal.value = r.total
+})
+const fetchCves = (signal: AbortSignal) =>
+  listScanCves({ limit: 50, offset: (cvePage.value - 1) * 50 }, signal)
 const cveTag = (s: string) => s === 'critical' ? 'danger' : s === 'high' ? 'danger' : s === 'medium' ? 'warning' : 'info'
 
-onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
+onMounted(() => { loadTargets(); loadTasks(fetchTasks); loadServices(fetchServices); loadCves(fetchCves) })
 </script>
 
 <template>
@@ -221,7 +256,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
 
     <!-- 任务列表 -->
     <el-tab-pane label="扫描任务" name="tasks">
-      <el-button class="mb-12" @click="loadTasks">刷新</el-button>
+      <el-button class="mb-12" @click="() => loadTasks(fetchTasks)">刷新</el-button>
       <div style="overflow-x: auto;">
       <el-table :data="tasks" stripe size="small" style="min-width: 920px;">
         <el-table-column prop="id" label="ID" width="60" />
@@ -237,7 +272,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
       </el-table>
       </div>
       <el-pagination v-if="taskTotal > 0" v-model:current-page="taskPage" :page-size="100" :total="taskTotal"
-        layout="prev, pager, next, total" background class="mt-12" @current-change="loadTasks" />
+        layout="prev, pager, next, total" background class="mt-12" @current-change="() => loadTasks(fetchTasks)" />
     </el-tab-pane>
 
     <!-- 发现明细 -->
@@ -266,7 +301,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
 
     <!-- 服务资产 -->
     <el-tab-pane label="AI服务资产" name="services">
-      <el-button class="mb-12" @click="loadServices">刷新</el-button>
+      <el-button class="mb-12" @click="() => loadServices(fetchServices)">刷新</el-button>
       <div style="overflow-x: auto;">
       <el-table :data="services" stripe size="small" max-height="560" style="min-width: 920px;">
         <el-table-column prop="ip" label="IP" width="140" />
@@ -288,12 +323,12 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
       </el-table>
       </div>
       <el-pagination v-if="svcTotal > 0" v-model:current-page="svcPage" :page-size="50" :total="svcTotal"
-        layout="prev, pager, next, total" background class="mt-12" @current-change="loadServices" />
+        layout="prev, pager, next, total" background class="mt-12" @current-change="() => loadServices(fetchServices)" />
     </el-tab-pane>
 
     <!-- CVE -->
     <el-tab-pane label="CVE漏洞" name="cve">
-      <el-button class="mb-12" @click="loadCves">刷新</el-button>
+      <el-button class="mb-12" @click="() => loadCves(fetchCves)">刷新</el-button>
       <div style="overflow-x: auto;">
       <el-table :data="cves" stripe size="small" style="min-width: 780px;">
         <el-table-column prop="cve_id" label="CVE ID" width="180" class-name="mono" />
@@ -307,7 +342,7 @@ onMounted(() => { loadTargets(); loadTasks(); loadServices(); loadCves() })
       </el-table>
       </div>
       <el-pagination v-if="cveTotal > 0" v-model:current-page="cvePage" :page-size="50" :total="cveTotal"
-        layout="prev, pager, next, total" background class="mt-12" @current-change="loadCves" />
+        layout="prev, pager, next, total" background class="mt-12" @current-change="() => loadCves(fetchCves)" />
     </el-tab-pane>
   </el-tabs>
 </template>

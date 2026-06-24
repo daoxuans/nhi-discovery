@@ -24,8 +24,8 @@ export interface AiStatsResp {
   top_hostnames: { hostname: string; count: number }[]
 }
 
-export const getAiStats = (time_range = '24h') =>
-  http.get<unknown, AiStatsResp>('/ai/events/stats', { params: { time_range } })
+export const getAiStats = (time_range = '24h', signal?: AbortSignal) =>
+  http.get<unknown, AiStatsResp>('/ai/events/stats', { params: { time_range }, signal })
 
 export interface AiEndpoint {
   id: number
@@ -70,7 +70,7 @@ export interface EndpointDetail {
 
 export const getAiEndpoints = (params: {
   role?: string; ip?: string; name?: string; limit?: number; offset?: number
-}) => http.get<unknown, { endpoints: AiEndpoint[]; total: number }>('/ai/endpoints', { params })
+}, signal?: AbortSignal) => http.get<unknown, { endpoints: AiEndpoint[]; total: number }>('/ai/endpoints', { params, signal })
 
 export const getAiEndpoint = (ip: string) => http.get<unknown, EndpointDetail>(`/ai/endpoint/${ip}`)
 

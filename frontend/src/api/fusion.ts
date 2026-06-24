@@ -24,7 +24,7 @@ export interface FusedAsset {
 export const getFusedAssets = (params: {
   ip?: string; svc_type?: string; source?: string;
   risk_level?: string; lifecycle_state?: string; limit?: number; offset?: number
-}) => http.get<unknown, { assets: FusedAsset[]; total: number }>('/assets/fused', { params })
+}, signal?: AbortSignal) => http.get<unknown, { assets: FusedAsset[]; total: number }>('/assets/fused', { params, signal })
 
 export interface FlowStats {
   total: number
@@ -34,4 +34,4 @@ export interface FlowStats {
   risks: Record<string, number>
 }
 
-export const getFlowStats = () => http.get<unknown, FlowStats>('/flows/stats')
+export const getFlowStats = (signal?: AbortSignal) => http.get<unknown, FlowStats>('/flows/stats', { signal })

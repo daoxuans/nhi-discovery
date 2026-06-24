@@ -11,16 +11,31 @@ const page = ref(1)
 const pageSize = 50
 const scatterEl = ref<HTMLElement>()
 
+// 请求世代号：防止分页快速翻页时旧响应覆盖新数据（F2）
+let loadGen = 0
+let inflight: AbortController | null = null
+
 const load = async () => {
+  const gen = ++loadGen
+  if (inflight) inflight.abort()
+  const ac = new AbortController()
+  inflight = ac
   loading.value = true
   try {
     const res = await getFusedAssets({
       source: source.value === 'all' ? undefined : source.value,
       limit: pageSize, offset: (page.value - 1) * pageSize,
-    })
+    }, ac.signal)
+    if (gen !== loadGen) return
     list.value = res.assets
     total.value = res.total
-  } finally { loading.value = false }
+  } catch (e: any) {
+    if (e?.name === 'CanceledError' || ac.signal.aborted) return
+    throw e
+  } finally {
+    if (gen === loadGen) loading.value = false
+    if (inflight === ac) inflight = null
+  }
 }
 
 const onSourceChange = () => { page.value = 1; load() }

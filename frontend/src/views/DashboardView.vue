@@ -14,14 +14,35 @@ const agentEl = ref<HTMLElement>()
 const svcTypeEl = ref<HTMLElement>()
 const detectionEl = ref<HTMLElement>()
 
+// 请求世代号：每次 load 自增，只有最新世代的响应才会写入 state（F1 竞态防护）
+// 防止 30s 定时刷新与手动切 timeRange 重叠时，旧响应覆盖新数据
+let loadGen = 0
+let inflight: AbortController | null = null
+
 const load = async () => {
+  const gen = ++loadGen
+  // 取消上一次未完成的请求
+  if (inflight) inflight.abort()
+  const ac = new AbortController()
+  inflight = ac
   try {
-    stats.value = await getAiStats(timeRange.value)
-    flowStats.value = await getFlowStats()
+    // Promise.all 并发，任一失败则整体 catch（但不影响已写入的旧数据）
+    const [s, f] = await Promise.all([
+      getAiStats(timeRange.value, ac.signal),
+      getFlowStats(ac.signal),
+    ])
+    // 只有最新世代的响应才写入，丢弃过期响应
+    if (gen !== loadGen) return
+    stats.value = s
+    flowStats.value = f
     await nextTick()
     renderCharts()
-  } catch (e) {
+  } catch (e: any) {
+    // 主动取消不报错
+    if (e?.name === 'CanceledError' || ac.signal.aborted) return
     console.error('[Dashboard] load error:', e)
+  } finally {
+    if (inflight === ac) inflight = null
   }
 }
 

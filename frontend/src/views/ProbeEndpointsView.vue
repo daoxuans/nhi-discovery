@@ -14,17 +14,33 @@ const pageSize = 20
 
 const parseJa4 = (s: string) => { try { return JSON.parse(s || '[]') as string[] } catch { return [] } }
 
+// 请求世代号：防止分页快速翻页时旧响应覆盖新数据（F2）
+let loadGen = 0
+let inflight: AbortController | null = null
+
 const load = async () => {
+  const gen = ++loadGen
+  if (inflight) inflight.abort()
+  const ac = new AbortController()
+  inflight = ac
   loading.value = true
   try {
     const res = await getAiEndpoints({
       role: role.value || undefined, name: keyword.value || undefined,
       limit: pageSize, offset: (page.value - 1) * pageSize,
-    })
+    }, ac.signal)
+    // 只有最新世代的响应才写入
+    if (gen !== loadGen) return
     // 预处理：把 ja4_list 解析成行内字段，避免模板每次渲染都 JSON.parse
     list.value = res.endpoints.map(e => ({ ...e, _ja4_count: parseJa4(e.ja4_list).length }))
     total.value = res.total
-  } finally { loading.value = false }
+  } catch (e: any) {
+    if (e?.name === 'CanceledError' || ac.signal.aborted) return
+    throw e
+  } finally {
+    if (gen === loadGen) loading.value = false
+    if (inflight === ac) inflight = null
+  }
 }
 
 const onFilterChange = () => { page.value = 1; load() }
