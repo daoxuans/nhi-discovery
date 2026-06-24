@@ -24,29 +24,6 @@ PROBE_DORMANT_DAYS = 7      # Probe 7 天无流量
 DORMANT_EXPIRE_DAYS = 30    # dormant 持续 30 天 → decommissioned
 
 
-def record_discovery(db: Database, ip, port=None, service=None, source="scan"):
-    """记录一次发现。新资产或 dormant 资产复活。"""
-    # 判断当前状态（ai_services 或 ai_endpoints）
-    with db.lock:
-        if port is not None:
-            row = db.conn.execute(
-                "SELECT lifecycle_state FROM ai_services WHERE ip=? AND port=? AND service=?",
-                (ip, port, service)
-            ).fetchone()
-        else:
-            row = db.conn.execute(
-                "SELECT lifecycle_state FROM ai_endpoints WHERE ip=? AND role='service'",
-                (ip,)
-            ).fetchone()
-    old_state = row["lifecycle_state"] if row else None
-    if old_state in (DORMANT, DECOMMISSIONED):
-        db.insert_lifecycle_event(
-            ip, port, service, "resurrected", old_state, ACTIVE,
-            {"source": source}
-        )
-        logger.info("asset resurrected", extra={"ip": ip, "port": port, "service": service, "old": old_state})
-
-
 def record_miss(db: Database, ip, port, service):
     """Scan 未发现已知 ai_service 时调用，miss_count += 1。"""
     with db.lock:
