@@ -2,6 +2,12 @@
 
 root 用 -sS（SYN scan），非 root 用 -sT（connect scan）。
 全局 --max-rate 限速。
+
+设计原则：AI agent 端口常被用户自定义（如 1Panel 容器随机分配），固定列表不可靠。
+两策略：
+  - 快速探测（quick）：只扫 AI 框架出厂默认端口，10 端口，秒级。适用快速巡检。
+  - 深度指纹（deep）：全端口 1-65535 TCP SYN 扫描 + 内容指纹，无遗漏，零维护。
+    单 IP 约 33s (2000pps)，/24 网段约 2-3 分钟。
 """
 
 import asyncio
@@ -13,13 +19,8 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
-# AI 框架默认端口 + 常见 Web 端口
-# 设计原则：AI agent 端口常被用户自定义（如 1Panel 随机分配），固定列表不可靠。
-# - AI_PORTS: 仅列"高置信度默认端口"（AI 框架出厂默认值），用于 ai_ports_only 快速探测。
-#   不含 80/443/3000/8000/8080 等通用 web 端口（那些走 web_only / full）。
-# - 发现自定义端口的 AI agent 靠 full 策略全端口扫描 + web_fingerprinter 内容指纹。
-# - 同时在 full 策略里扩展常见 AI 端口，避免漏扫已知框架。
-AI_PORTS = [
+# 快速探测：AI 框架出厂默认端口（研发不改端口时秒发现）
+QUICK_PORTS = [
     11434,   # Ollama
     7860,    # Gradio
     8501,    # Streamlit
@@ -31,18 +32,6 @@ AI_PORTS = [
     19530,   # Milvus 向量库
     6333,    # Qdrant 向量库
 ]
-# WEB_PORTS：通用 web 端口，web_only 策略用；web_fingerprinter 对这些端口做内容指纹
-WEB_PORTS = [80, 443, 3000, 5001, 8000, 8080, 8443, 8888]
-# FULL_PORTS：full 策略扫描的端口集合 = AI 默认端口 + web 端口 + 更多可能部署 agent 的端口
-# 覆盖常见自定义 agent 部署区间，配合内容指纹发现非标准端口 agent
-FULL_PORTS = sorted(set(
-    AI_PORTS
-    + WEB_PORTS
-    + [5678, 8888, 9119, 9120, 18789, 18791,   # 已知 agent 自定义端口区间
-       8889, 9999, 11434, 8000, 8001, 8080,     # 备用
-       7860, 7861, 8501, 8502,                  # Gradio/Streamlit 备用
-       2375, 2376, 6443, 10250, 16443]          # 容器/K8s（探测未授权）
-))
 
 
 @dataclass
@@ -61,7 +50,7 @@ def _is_root() -> bool:
 
 async def probe_ports(cidr: str, ports: List[int], rate_pps: int,
                       timeout: int = 300, nmap_timing: str = "-T3") -> List[PortFinding]:
-    """对 cidr 扫指定端口，返回开放端口列表。nmap_timing 控制 -T 档位。"""
+    """快扫：对 cidr 扫指定端口，返回开放端口列表。nmap_timing 控制 -T 档位。"""
     scan_type = "-sS" if _is_root() else "-sT"
     port_str = ",".join(str(p) for p in sorted(set(ports)))
     cmd = [
@@ -70,7 +59,30 @@ async def probe_ports(cidr: str, ports: List[int], rate_pps: int,
         "-n",  # 不做 DNS 反解，加速
         cidr,
     ]
-    logger.info(f"nmap: {' '.join(cmd)}")
+    logger.info(f"nmap quick: {' '.join(cmd)}")
+    return await _run_nmap(cmd, cidr, timeout)
+
+
+async def probe_ports_full(cidr: str, rate_pps: int,
+                           timeout: int = 600, nmap_timing: str = "-T4") -> List[PortFinding]:
+    """深度指纹：全端口 1-65535 TCP SYN 扫描，无遗漏。
+
+    -p 1-65535 覆盖所有 TCP 端口，nmap 并行扫描多台主机。
+    配合 web_fingerprinter 内容指纹，1Panel/自定义端口的 agent 无死角。
+    单 IP 约 33s @ 2000pps；/24 网段约 2-3 min。
+    """
+    scan_type = "-sS" if _is_root() else "-sT"
+    cmd = [
+        "nmap", scan_type, nmap_timing, f"--max-rate={rate_pps}",
+        "-p", "1-65535", "-oX", "-", "--webxml",
+        "-n",
+        cidr,
+    ]
+    logger.info(f"nmap deep (full-port): {' '.join(cmd)}")
+    return await _run_nmap(cmd, cidr, timeout)
+
+
+async def _run_nmap(cmd: List[str], cidr: str, timeout: int) -> List[PortFinding]:
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

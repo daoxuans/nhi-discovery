@@ -20,7 +20,7 @@ import aiohttp
 from app.config import settings
 from app.core.db import Database, now_cst
 from app.scan.rate_limiter import GlobalRateLimiter, PerTargetRateLimiter
-from app.scan.workers.port_prober import probe_ports, PortFinding, AI_PORTS, WEB_PORTS
+from app.scan.workers.port_prober import probe_ports, probe_ports_full, PortFinding, QUICK_PORTS
 from app.scan.workers.api_prober import probe_api, ApiFinding, PORT_API_MAP
 from app.scan.workers.web_fingerprinter import fingerprint_web, WebFinding
 from app.scan.workers.container_prober import probe_container, ContainerFinding
@@ -76,7 +76,7 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
     per_target_qps = profile["per_target_qps"]
     nmap_T = profile["nmap_T"]
 
-    scan_strategy = (target["scan_strategy"] if target else "full")
+    scan_strategy = (target["scan_strategy"] if target else "deep")
     concurrency = settings.scan_concurrency
     api_timeout = settings.scan_api_timeout
 
@@ -86,19 +86,20 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
 
     try:
         # ── Stage 1: Port Prober ──
-        if scan_strategy == "ai_ports_only":
-            ports = AI_PORTS
-        elif scan_strategy == "web_only":
-            ports = WEB_PORTS
+        if scan_strategy == "quick":
+            # 快速探测：只扫 AI 框架出厂默认端口（Ollama/Gradio/TGI等10端口），秒级
+            port_findings: List[PortFinding] = await probe_ports(
+                cidr, QUICK_PORTS, rate_pps,
+                timeout=settings.scan_port_timeout, nmap_timing=nmap_T,
+            )
         else:
-            # full：AI默认端口 + web端口 + 常见 agent 自定义端口区间
-            # 配合 web_fingerprinter 内容指纹，发现非标准端口部署的 agent
-            from app.scan.workers.port_prober import FULL_PORTS
-            ports = FULL_PORTS
-
-        port_findings: List[PortFinding] = await probe_ports(
-            cidr, ports, rate_pps, timeout=settings.scan_port_timeout, nmap_timing=nmap_T
-        )
+            # 深度指纹：全端口 1-65535 TCP SYN + 内容指纹，无遗漏，零维护
+            # 单IP ~33s @ 2000pps，/24 网段约 2-3min
+            port_findings: List[PortFinding] = await probe_ports_full(
+                cidr, rate_pps,
+                timeout=settings.scan_port_timeout * 2,
+                nmap_timing="-T4",  # 全端口用 T4 加速
+            )
         db.update_scan_task(task_id, targets_scanned=len(port_findings))
         logger.info(f"scan {task_id}: {len(port_findings)} open ports found")
 

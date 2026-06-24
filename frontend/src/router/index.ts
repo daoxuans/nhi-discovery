@@ -17,8 +17,10 @@ const routes = [
     meta: { title: '探针识别资产', icon: 'Connection' } },
   { path: '/probe/endpoint/:ip', name: 'probe-endpoint-detail', component: () => import('@/views/EndpointDetailView.vue'),
     meta: { title: '端点画像', hidden: true } },
-  { path: '/scan', name: 'scan', component: () => import('@/views/ScanView.vue'),
-    meta: { title: '主动扫描', icon: 'Search' } },
+  { path: '/scan/assets', name: 'scan-assets', component: () => import('@/views/ScanAssetsView.vue'),
+    meta: { title: '主动扫描资产', icon: 'Search' } },
+  { path: '/scan/config', name: 'scan-config', component: () => import('@/views/ScanConfigView.vue'),
+    meta: { title: '扫描配置', icon: 'Setting' } },
   { path: '/fusion', name: 'fusion', component: () => import('@/views/FusionView.vue'),
     meta: { title: '融合资产', icon: 'Share' } },
 ]

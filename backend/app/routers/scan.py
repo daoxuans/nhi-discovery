@@ -29,8 +29,8 @@ class TriggerBody(BaseModel):
     target_id: int = None
     cidr: str = None
     scan_range: str = None   # IP / IP1-IP2 / CIDR（语义更清晰，向后兼容 cidr）
-    scan_strategy: str = "full"
-    speed: str = "normal"    # slow / normal / fast
+    scan_strategy: str = "deep"    # quick / deep
+    speed: str = "normal"          # slow / normal / fast
 
 
 class TargetBody(BaseModel):

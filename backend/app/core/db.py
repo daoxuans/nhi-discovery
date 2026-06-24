@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS scan_targets (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL UNIQUE,
     cidr            TEXT NOT NULL,
-    scan_strategy   TEXT NOT NULL DEFAULT 'full',
+    scan_strategy   TEXT NOT NULL DEFAULT 'deep',
     full_interval   INTEGER DEFAULT 1800,
     incr_interval   INTEGER DEFAULT 300,
     rate_limit_pps  INTEGER DEFAULT 500,
