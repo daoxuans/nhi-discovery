@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, onUnmounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   triggerScan, listScanTargets, createScanTarget, updateScanTarget, deleteScanTarget,
@@ -93,6 +93,7 @@ const taskPage = ref(1)
 const taskPageSize = 15
 const taskTotal = ref(0)
 const taskTypeFilter = ref('')
+let taskTimer: number | null = null
 
 const loadTasks = async () => {
   taskLoading.value = true
@@ -106,8 +107,36 @@ const loadTasks = async () => {
     taskTotal.value = r.total ?? r.tasks.length
   } finally { taskLoading.value = false }
 }
+
+// 如果有 running 任务，每 2s 自动刷新进度
+const startTaskPolling = () => {
+  if (taskTimer) return
+  taskTimer = window.setInterval(async () => {
+    const hasRunning = tasks.value.some(t => t.status === 'running')
+    if (!hasRunning) {
+      stopTaskPolling()
+      return
+    }
+    await loadTasks()
+  }, 5000)
+}
+const stopTaskPolling = () => {
+  if (taskTimer) { clearInterval(taskTimer); taskTimer = null }
+}
+
 const onTaskFilterChange = () => { taskPage.value = 1; loadTasks() }
 const statusTag = (s: string) => s === 'done' ? 'success' : s === 'failed' ? 'danger' : s === 'running' ? 'warning' : 'info'
+
+const progressPhaseName = (p: string | null) => {
+  if (p === 'port_scan') return '端口扫描'
+  if (p === 'content_probe') return '内容探测'
+  return p || ''
+}
+
+const progressPercent = (done: number, total: number) => {
+  if (!total) return 0
+  return Math.round((done / total) * 100)
+}
 
 const activeTab = ref('trigger')
 
@@ -137,7 +166,8 @@ const loadFindings = async () => {
   } catch {} finally { findingsLoading.value = false }
 }
 
-onMounted(() => { loadTargets(); loadTasks() })
+onMounted(() => { loadTargets(); loadTasks(); startTaskPolling() })
+onUnmounted(() => { stopTaskPolling() })
 </script>
 
 <template>
@@ -244,11 +274,27 @@ onMounted(() => { loadTargets(); loadTasks() })
         </el-form-item>
       </el-form>
       <div style="overflow-x: auto;">
-      <el-table :data="tasks" v-loading="taskLoading" stripe size="small" style="min-width: 860px;">
+      <el-table :data="tasks" v-loading="taskLoading" stripe size="small" style="min-width: 980px;">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="task_type" label="类型" width="90" />
         <el-table-column prop="status" label="状态" width="90">
           <template #default="{ row }"><el-tag :type="statusTag(row.status)" size="small">{{ row.status }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="进度" width="200">
+          <template #default="{ row }">
+            <div v-if="row.status === 'running' && row.progress_total" style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 11px; color: #909399; white-space: nowrap;">{{ progressPhaseName(row.progress_phase) }}</span>
+              <el-progress :percentage="progressPercent(row.progress_done, row.progress_total)"
+                :stroke-width="8" :show-text="true" style="flex: 1; min-width: 60px;">
+                <template #default="{ percentage }">
+                  <span style="font-size: 11px;">{{ row.progress_done }}/{{ row.progress_total }}</span>
+                </template>
+              </el-progress>
+            </div>
+            <span v-else-if="row.status === 'done'" style="color: #67c23a; font-size: 12px;">✓ 完成</span>
+            <span v-else-if="row.status === 'failed'" style="color: #f56c6c; font-size: 12px;">✗ 失败</span>
+            <span v-else style="color: #909399; font-size: 12px;">排队中</span>
+          </template>
         </el-table-column>
         <el-table-column prop="ports_scanned" label="端口数" width="80" align="right" />
         <el-table-column prop="findings_count" label="发现数" width="80" align="right" />

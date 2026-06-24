@@ -23,7 +23,7 @@ async def list_fused_assets(
     db = request.app.state.db
     # Phase 1: 返回融合查询（ai_services LEFT JOIN ai_endpoints）
     # Phase 4 会完善 probe-only 资产（终端 Agent）
-    src = "both" if source == "all" else source
+    src = None if source == "all" else source
     return db.get_fused_assets(
         ip=ip, svc_type=svc_type, source=src,
         risk_level=risk_level, lifecycle_state=lifecycle_state,

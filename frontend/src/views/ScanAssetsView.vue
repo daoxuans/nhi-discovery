@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { listScanServices, type AiService } from '@/api/scan'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { listScanServices, listScanTasks, type AiService } from '@/api/scan'
 
 const loading = ref(false)
 const list = ref<AiService[]>([])
@@ -11,6 +11,7 @@ const ip = ref('')
 const lifecycle = ref('')
 const page = ref(1)
 const pageSize = 20
+let pollTimer: number | null = null
 
 const load = async () => {
   loading.value = true
@@ -25,6 +26,31 @@ const load = async () => {
     list.value = r.services
     total.value = r.total
   } finally { loading.value = false }
+}
+
+// 只在有 running 扫描任务时才自动刷新，5s 轮询
+const startPollIfRunning = async () => {
+  try {
+    const r = await listScanTasks(50, 0)
+    const hasRunning = r.tasks.some(t => t.status === 'running')
+    if (hasRunning && !pollTimer) {
+      pollTimer = window.setInterval(async () => {
+        const r2 = await listScanTasks(50, 0)
+        const stillRunning = r2.tasks.some(t => t.status === 'running')
+        if (!stillRunning) {
+          // 扫描全部完成：最后一次刷新数据，然后停轮询
+          await load()
+          stopPoll()
+          return
+        }
+        await load()
+      }, 5000)
+    }
+  } catch {}
+}
+
+const stopPoll = () => {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
 
 const onFilterChange = () => { page.value = 1; load() }
@@ -52,7 +78,8 @@ const svcTypeOptions = [
   { label: 'LLM Web', value: 'LLM_Web' },
 ]
 
-onMounted(load)
+onMounted(async () => { await load(); await startPollIfRunning() })
+onUnmounted(stopPoll)
 </script>
 
 <template>

@@ -163,6 +163,9 @@ CREATE TABLE IF NOT EXISTS scan_tasks (
     targets_scanned INTEGER DEFAULT 0,
     ports_scanned   INTEGER DEFAULT 0,
     findings_count  INTEGER DEFAULT 0,
+    progress_total  INTEGER DEFAULT 0,
+    progress_done   INTEGER DEFAULT 0,
+    progress_phase  TEXT,
     error_msg       TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (target_id) REFERENCES scan_targets(id)
@@ -317,6 +320,8 @@ class Database:
             self._conn.executescript(SCHEMA_SQL)
             # 平滑升级：老库 scan_targets 无 speed 列时补上
             self._migrate_scan_targets()
+            # 平滑升级：老库 scan_tasks 无进度列时补上
+            self._migrate_scan_tasks()
             self._conn.commit()
 
     def _migrate_scan_targets(self):
@@ -327,6 +332,25 @@ class Database:
                 "ALTER TABLE scan_targets ADD COLUMN speed TEXT DEFAULT 'normal'"
             )
             logger.info("migrated scan_targets: added column speed")
+
+    def _migrate_scan_tasks(self):
+        """老库 scan_tasks 加进度列（Phase 4 scan progress）。"""
+        task_cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(scan_tasks)").fetchall()}
+        if "progress_total" not in task_cols:
+            self._conn.execute(
+                "ALTER TABLE scan_tasks ADD COLUMN progress_total INTEGER DEFAULT 0"
+            )
+            logger.info("migrated scan_tasks: added column progress_total")
+        if "progress_done" not in task_cols:
+            self._conn.execute(
+                "ALTER TABLE scan_tasks ADD COLUMN progress_done INTEGER DEFAULT 0"
+            )
+            logger.info("migrated scan_tasks: added column progress_done")
+        if "progress_phase" not in task_cols:
+            self._conn.execute(
+                "ALTER TABLE scan_tasks ADD COLUMN progress_phase TEXT"
+            )
+            logger.info("migrated scan_tasks: added column progress_phase")
 
     @property
     def conn(self):
@@ -837,7 +861,9 @@ class Database:
 
     def update_scan_task(self, task_id, status=None, started_at=None,
                          finished_at=None, targets_scanned=None,
-                         ports_scanned=None, findings_count=None, error_msg=None):
+                         ports_scanned=None, findings_count=None,
+                         progress_total=None, progress_done=None,
+                         progress_phase=None, error_msg=None):
         sets, params = [], []
         if status: sets.append("status=?"); params.append(status)
         if started_at: sets.append("started_at=?"); params.append(started_at)
@@ -845,6 +871,9 @@ class Database:
         if targets_scanned is not None: sets.append("targets_scanned=?"); params.append(targets_scanned)
         if ports_scanned is not None: sets.append("ports_scanned=?"); params.append(ports_scanned)
         if findings_count is not None: sets.append("findings_count=?"); params.append(findings_count)
+        if progress_total is not None: sets.append("progress_total=?"); params.append(progress_total)
+        if progress_done is not None: sets.append("progress_done=?"); params.append(progress_done)
+        if progress_phase is not None: sets.append("progress_phase=?"); params.append(progress_phase)
         if error_msg: sets.append("error_msg=?"); params.append(error_msg)
         if not sets:
             return
@@ -1166,7 +1195,7 @@ class Database:
 
     # ──────────────── 融合查询 ────────────────
 
-    def get_fused_assets(self, ip=None, svc_type=None, source="both",
+    def get_fused_assets(self, ip=None, svc_type=None, source=None,
                          risk_level=None, lifecycle_state=None,
                          limit=100, offset=0) -> Dict:
         conditions, params = [], []
@@ -1182,6 +1211,7 @@ class Database:
             conditions.append("s.probe_seen=1")
         elif source == "scan":
             conditions.append("s.probe_seen=0")
+        # source=None → no filter, show all
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = f"""SELECT s.ip, s.port, s.service, s.vendor, s.svc_type, s.version,
                          s.models, s.lifecycle_state, s.scan_count, s.last_seen AS scan_last_seen,

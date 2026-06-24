@@ -28,6 +28,9 @@ export interface ScanTask {
   targets_scanned: number
   ports_scanned: number
   findings_count: number
+  progress_total: number
+  progress_done: number
+  progress_phase: string | null
   error_msg: string | null
   created_at: string
 }
