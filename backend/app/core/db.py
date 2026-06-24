@@ -853,6 +853,27 @@ class Database:
             self._conn.execute(f"UPDATE scan_tasks SET {', '.join(sets)} WHERE id=?", params)
             self._conn.commit()
 
+    def recover_stuck_tasks(self) -> int:
+        """启动恢复：把 status='running' 的任务标记为 failed。
+
+        服务器重启后，内存中的后台扫描任务已丢失，但 DB 里仍记 'running'，
+        前端会永远显示运行中。启动时调用此方法清理（R3）。
+        返回恢复的任务数。
+        """
+        now = now_cst()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE scan_tasks SET status='failed', finished_at=?, "
+                "error_msg='interrupted by server restart' "
+                "WHERE status='running' OR status='queued'",
+                (now,)
+            )
+            self._conn.commit()
+        n = cur.rowcount
+        if n > 0:
+            logger.info(f"recovered {n} stuck scan_tasks (running/queued → failed)")
+        return n
+
     def get_scan_task(self, task_id) -> Optional[Dict]:
         row = self._read_conn.execute(
             "SELECT * FROM scan_tasks WHERE id=?", (task_id,)

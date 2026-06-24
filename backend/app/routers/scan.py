@@ -132,11 +132,11 @@ async def get_scan_task(request: Request, task_id: int):
 async def list_scan_tasks(request: Request, limit: int = Query(20, ge=1, le=100),
                           offset: int = Query(0, ge=0)):
     db = _get_db(request)
-    with db.lock:
-        rows = db.conn.execute(
-            "SELECT * FROM scan_tasks ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)
-        ).fetchall()
-        total = db.conn.execute("SELECT COUNT(*) FROM scan_tasks").fetchone()[0]
+    rc = db.rconn
+    rows = rc.execute(
+        "SELECT * FROM scan_tasks ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)
+    ).fetchall()
+    total = rc.execute("SELECT COUNT(*) FROM scan_tasks").fetchone()[0]
     return {"tasks": [dict(r) for r in rows], "total": total}
 
 

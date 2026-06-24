@@ -27,6 +27,9 @@ async def lifespan(app: FastAPI):
     # ── Database ──
     db = Database()
     db.upsert_session(settings.session_id, "running")
+    # 启动恢复：把上次未完成的扫描任务（running/queued）标记为 failed，
+    # 避免服务器重启后任务永远卡 "running"（R3）
+    db.recover_stuck_tasks()
     app.state.db = db
 
     # ── 种子数据：Scan targets + CVE ──
