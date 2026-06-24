@@ -741,23 +741,23 @@ class Database:
         return self._read_conn.execute(f"SELECT COUNT(*) FROM ai_endpoints{where}", params).fetchone()[0]
 
     def get_ai_endpoint(self, ip: str) -> Dict:
-        with self._lock:
-            agents = [dict(r) for r in self._conn.execute(
-                "SELECT * FROM ai_endpoints WHERE ip=? AND role='agent' ORDER BY flow_count DESC",
-                (ip,)
-            ).fetchall()]
-            services = [dict(r) for r in self._conn.execute(
-                "SELECT * FROM ai_endpoints WHERE ip=? AND role='service' ORDER BY flow_count DESC",
-                (ip,)
-            ).fetchall()]
-            timeline = [dict(r) for r in self._conn.execute(
-                "SELECT * FROM asset_lifecycle WHERE ip=? ORDER BY occurred_at DESC LIMIT 20",
-                (ip,)
-            ).fetchall()]
-            scan_svcs = [dict(r) for r in self._conn.execute(
-                "SELECT port, service, vendor, version, lifecycle_state, scan_count, last_seen "
-                "FROM ai_services WHERE ip=? ORDER BY scan_count DESC", (ip,)
-            ).fetchall()]
+        rc = self._read_conn
+        agents = [dict(r) for r in rc.execute(
+            "SELECT * FROM ai_endpoints WHERE ip=? AND role='agent' ORDER BY flow_count DESC",
+            (ip,)
+        ).fetchall()]
+        services = [dict(r) for r in rc.execute(
+            "SELECT * FROM ai_endpoints WHERE ip=? AND role='service' ORDER BY flow_count DESC",
+            (ip,)
+        ).fetchall()]
+        timeline = [dict(r) for r in rc.execute(
+            "SELECT * FROM asset_lifecycle WHERE ip=? ORDER BY occurred_at DESC LIMIT 20",
+            (ip,)
+        ).fetchall()]
+        scan_svcs = [dict(r) for r in rc.execute(
+            "SELECT port, service, vendor, version, lifecycle_state, scan_count, last_seen "
+            "FROM ai_services WHERE ip=? ORDER BY scan_count DESC", (ip,)
+        ).fetchall()]
         return {
             "ip": ip,
             "agents": agents,
@@ -854,17 +854,15 @@ class Database:
             self._conn.commit()
 
     def get_scan_task(self, task_id) -> Optional[Dict]:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM scan_tasks WHERE id=?", (task_id,)
-            ).fetchone()
+        row = self._read_conn.execute(
+            "SELECT * FROM scan_tasks WHERE id=?", (task_id,)
+        ).fetchone()
         return dict(row) if row else None
 
     def get_scan_task_by_uuid(self, task_uuid) -> Optional[Dict]:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM scan_tasks WHERE task_uuid=?", (task_uuid,)
-            ).fetchone()
+        row = self._read_conn.execute(
+            "SELECT * FROM scan_tasks WHERE task_uuid=?", (task_uuid,)
+        ).fetchone()
         return dict(row) if row else None
 
     # ──────────────── Scan: findings ────────────────
@@ -1062,20 +1060,18 @@ class Database:
 
     def get_probe_endpoints_for_ip(self, ip):
         """Scan 融合用：查 Probe ai_endpoints(role=service) 该 IP。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT name, vendor, category, last_seen, flow_count FROM ai_endpoints "
-                "WHERE ip=? AND role='service'", (ip,)
-            ).fetchall()
+        rows = self._read_conn.execute(
+            "SELECT name, vendor, category, last_seen, flow_count FROM ai_endpoints "
+            "WHERE ip=? AND role='service'", (ip,)
+        ).fetchall()
         return [dict(r) for r in rows]
 
     def list_active_endpoint_ips(self):
         """Probe 侧融合用：所有 active 的 service 端点 ip + last_seen。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT ip, last_seen FROM ai_endpoints "
-                "WHERE role='service' AND lifecycle_state='active'"
-            ).fetchall()
+        rows = self._read_conn.execute(
+            "SELECT ip, last_seen FROM ai_endpoints "
+            "WHERE role='service' AND lifecycle_state='active'"
+        ).fetchall()
         return [dict(r) for r in rows]
 
     # ──────────────── CVE ────────────────
@@ -1118,10 +1114,9 @@ class Database:
         return self._read_conn.execute(f"SELECT COUNT(*) FROM cve_records{where}", params).fetchone()[0]
 
     def list_all_cves(self) -> List[Dict]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM cve_records ORDER BY cvss_score DESC"
-            ).fetchall()
+        rows = self._read_conn.execute(
+            "SELECT * FROM cve_records ORDER BY cvss_score DESC"
+        ).fetchall()
         return [dict(r) for r in rows]
 
     # ──────────────── asset_lifecycle ────────────────
