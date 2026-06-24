@@ -40,8 +40,19 @@ def _risk_from_cves(cves: List[dict]) -> str:
     return "low"
 
 
-def create_scan_task(db: Database, target_id, cidr, task_type="manual"):
-    """创建扫描任务行，返回 (task_id, task_uuid, resolved_cidr, target)。"""
+_SPEED_PROFILES = {
+    "slow":   {"rate_pps": 100,  "per_target_qps": 5,  "nmap_T": "-T2"},
+    "normal": {"rate_pps": 500,  "per_target_qps": 10, "nmap_T": "-T3"},
+    "fast":   {"rate_pps": 2000, "per_target_qps": 30, "nmap_T": "-T4"},
+}
+
+
+def create_scan_task(db: Database, target_id, cidr, task_type="manual",
+                     speed=None, scan_strategy=None):
+    """创建扫描任务行，返回 (task_id, task_uuid, resolved_cidr, target)。
+
+    speed/scan_strategy 仅在 ad-hoc（无 target_id）扫描时生效，覆盖默认。
+    """
     task_uuid = str(uuid.uuid4())[:13] + "-scan"
     target = db.get_scan_target(target_id) if target_id else None
     if target:
@@ -53,16 +64,25 @@ def create_scan_task(db: Database, target_id, cidr, task_type="manual"):
 
 
 async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
-                               task_type: str = "manual"):
-    """对已存在的 task_id 执行扫描核心逻辑。"""
-    rate_pps = target["rate_limit_pps"] if target else settings.scan_global_pps
-    per_target_qps = target["per_target_qps"] if target else settings.scan_per_target_qps
-    scan_strategy = target["scan_strategy"] if target else "full"
+                               task_type: str = "manual", speed: str = None):
+    """对已存在的 task_id 执行扫描核心逻辑。
+
+    速率优先级：显式 speed > target.speed > target.rate_limit_pps > 默认。
+    """
+    # 解析速率档位：优先显式 speed，其次 target 的 speed 列，最后回退默认
+    speed = speed or (target.get("speed") if target else None) or "normal"
+    profile = _SPEED_PROFILES.get(speed, _SPEED_PROFILES["normal"])
+    rate_pps = profile["rate_pps"]
+    per_target_qps = profile["per_target_qps"]
+    nmap_T = profile["nmap_T"]
+
+    scan_strategy = (target["scan_strategy"] if target else "full")
     concurrency = settings.scan_concurrency
     api_timeout = settings.scan_api_timeout
 
     db.update_scan_task(task_id, status="running", started_at=now_cst())
-    logger.info(f"scan task {task_id} ({task_type}) started for {cidr} (strategy={scan_strategy})")
+    logger.info(f"scan task {task_id} ({task_type}) started for {cidr} "
+                f"(strategy={scan_strategy}, speed={speed}, pps={rate_pps}, T={nmap_T})")
 
     try:
         # ── Stage 1: Port Prober ──
@@ -74,7 +94,7 @@ async def run_scan_with_taskid(db: Database, task_id: int, target, cidr: str,
             ports = list(set(AI_PORTS + WEB_PORTS))
 
         port_findings: List[PortFinding] = await probe_ports(
-            cidr, ports, rate_pps, timeout=settings.scan_port_timeout
+            cidr, ports, rate_pps, timeout=settings.scan_port_timeout, nmap_timing=nmap_T
         )
         db.update_scan_task(task_id, targets_scanned=len(port_findings))
         logger.info(f"scan {task_id}: {len(port_findings)} open ports found")

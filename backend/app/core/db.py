@@ -9,11 +9,17 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _mono():
+    """单调时钟，用于缓存 TTL（不用 wall clock 避免系统时间跳变）。"""
+    return time.monotonic()
 
 
 SCHEMA_SQL = """
@@ -58,6 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_flows_session ON flows(session_id);
 CREATE INDEX IF NOT EXISTS idx_flows_proto   ON flows(proto);
 CREATE INDEX IF NOT EXISTS idx_flows_time    ON flows(created_at);
 CREATE INDEX IF NOT EXISTS idx_flows_ip      ON flows(src_ip, dst_ip);
+CREATE INDEX IF NOT EXISTS idx_flows_category ON flows(category) WHERE category IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS ai_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,6 +148,7 @@ CREATE TABLE IF NOT EXISTS scan_targets (
     per_target_qps  INTEGER DEFAULT 10,
     scan_window     TEXT DEFAULT '00:00-06:00',
     enabled         INTEGER DEFAULT 0,
+    speed           TEXT DEFAULT 'normal',
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -299,11 +307,25 @@ class Database:
         self._read_conn.execute("PRAGMA journal_mode=WAL")
         self._read_conn.execute("PRAGMA query_only=ON")
         self._read_conn.row_factory = sqlite3.Row
+        # stats 结果缓存：{time_range: (mono_ts, result)}，TTL 30s
+        self._stats_cache: Dict[str, Any] = {}
+        self._flow_stats_cache: Optional[Any] = None  # (mono_ts, result)
 
     def _init_schema(self):
         with self._lock:
             self._conn.executescript(SCHEMA_SQL)
+            # 平滑升级：老库 scan_targets 无 speed 列时补上
+            self._migrate_scan_targets()
             self._conn.commit()
+
+    def _migrate_scan_targets(self):
+        """老库 scan_targets 加 speed 列（IF NOT EXISTS 模式）。"""
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(scan_targets)").fetchall()}
+        if "speed" not in cols:
+            self._conn.execute(
+                "ALTER TABLE scan_targets ADD COLUMN speed TEXT DEFAULT 'normal'"
+            )
+            logger.info("migrated scan_targets: added column speed")
 
     @property
     def conn(self):
@@ -425,6 +447,9 @@ class Database:
         return self._read_conn.execute(sql, params).fetchone()[0]
 
     def flow_stats(self) -> Dict:
+        cached = self._flow_stats_cache
+        if cached and (_mono() - cached[0]) < 30.0:
+            return cached[1]
         rc = self._read_conn
         total = rc.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
         protocols = [dict(r) for r in rc.execute(
@@ -444,13 +469,15 @@ class Database:
             "SELECT SUM(CASE WHEN risk_count>0 THEN 1 ELSE 0 END) as risky_flows, "
             "SUM(risk_count) as total_risks FROM flows"
         ).fetchone()
-        return {
+        result = {
             "total": total,
             "protocols": protocols,
             "categories": categories,
             "detection": detection,
             "risks": dict(risk_row) if risk_row else {},
         }
+        self._flow_stats_cache = (_mono(), result)
+        return result
 
     # ──────────────── ai_events (Probe Layer1/2 流水) ────────────────
 
@@ -556,11 +583,19 @@ class Database:
         return self._read_conn.execute(f"SELECT COUNT(*) FROM ai_events{where}", params).fetchone()[0]
 
     def ai_events_stats(self, time_range="all") -> Dict:
-        """统计聚合。合并为少量查询 + 用只读连接，避免被写线程阻塞。
-
-        时间过滤 + confirmed 过滤利用 idx_ai_events_time_vendor 复合索引，
-        不再逐列 GROUP BY 各扫一次全表。
+        """统计聚合。结果按 time_range 做 30s 内存缓存（Dashboard 30s 轮询命中缓存 <1ms）。
+        合并查询 + 只读连接，避免被写线程阻塞。
         """
+        now_mono = _mono()
+        cached = self._stats_cache.get(time_range)
+        if cached and (now_mono - cached[0]) < 30.0:
+            return cached[1]
+
+        result = self._ai_events_stats_uncached(time_range)
+        self._stats_cache[time_range] = (now_mono, result)
+        return result
+
+    def _ai_events_stats_uncached(self, time_range="all") -> Dict:
         if time_range == "1h":
             time_cond = "created_at >= datetime('now','-1 hour')"
         elif time_range == "24h":
@@ -747,6 +782,31 @@ class Database:
             )
             self._conn.commit()
             return cur.lastrowid
+
+    def update_scan_target(self, target_id: int, **fields) -> bool:
+        """PATCH 式更新 scan_targets。支持 name/cidr/scan_strategy/full_interval/speed/enabled。"""
+        allowed = {"name", "cidr", "scan_strategy", "full_interval",
+                   "incr_interval", "rate_limit_pps", "per_target_qps",
+                   "scan_window", "enabled", "speed"}
+        sets, params = [], []
+        for k, v in fields.items():
+            if k in allowed and v is not None:
+                sets.append(f"{k}=?"); params.append(v)
+        if not sets:
+            return False
+        params.append(target_id)
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE scan_targets SET {', '.join(sets)} WHERE id=?", params
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def delete_scan_target(self, target_id: int) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM scan_targets WHERE id=?", (target_id,))
+            self._conn.commit()
+            return cur.rowcount > 0
 
     def list_scan_targets(self, enabled_only=False) -> List[Dict]:
         sql = "SELECT * FROM scan_targets"

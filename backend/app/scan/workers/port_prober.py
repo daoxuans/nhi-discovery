@@ -33,12 +33,12 @@ def _is_root() -> bool:
 
 
 async def probe_ports(cidr: str, ports: List[int], rate_pps: int,
-                      timeout: int = 300) -> List[PortFinding]:
-    """对 cidr 扫指定端口，返回开放端口列表。"""
+                      timeout: int = 300, nmap_timing: str = "-T3") -> List[PortFinding]:
+    """对 cidr 扫指定端口，返回开放端口列表。nmap_timing 控制 -T 档位。"""
     scan_type = "-sS" if _is_root() else "-sT"
     port_str = ",".join(str(p) for p in sorted(set(ports)))
     cmd = [
-        "nmap", scan_type, "-T3", f"--max-rate={rate_pps}",
+        "nmap", scan_type, nmap_timing, f"--max-rate={rate_pps}",
         "-p", port_str, "-oX", "-", "--webxml",
         "-n",  # 不做 DNS 反解，加速
         cidr,
