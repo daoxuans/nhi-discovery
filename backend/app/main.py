@@ -74,6 +74,13 @@ async def lifespan(app: FastAPI):
         app.state.scan_scheduler = None
         logger.info("ScanScheduler disabled (SCAN_SCHEDULER_ENABLED=0)")
 
+    # ── Retention（独立后台线程，不依赖 scan_scheduler_enabled）──
+    # 即使不自动扫描，数据保留清理仍定期执行，防止 flows/ai_events 无限增长（R1）
+    from app.core.retention import RetentionScheduler
+    retention_scheduler = RetentionScheduler(db)
+    retention_scheduler.start()
+    app.state.retention_scheduler = retention_scheduler
+
     logger.info("NHI Discovery ready (Probe + Scan)")
     yield
 
@@ -84,6 +91,8 @@ async def lifespan(app: FastAPI):
         app.state.ai_writer.stop()
     if getattr(app.state, "db_writer", None):
         app.state.db_writer.stop()
+    if getattr(app.state, "retention_scheduler", None):
+        app.state.retention_scheduler.stop()
     if getattr(app.state, "scan_scheduler", None):
         app.state.scan_scheduler.shutdown()
     db.close()

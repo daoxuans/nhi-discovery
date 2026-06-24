@@ -5,7 +5,9 @@
   - Incremental: 每 5min（已知 ai_services 活跃度复核）
   - CVE 复扫: 每日 02:30
   - Lifecycle check: 每日 03:00
-  - Retention: 每日 02:00
+  - NVD 更新: 每日 02:15
+注意：Retention 已独立为 RetentionScheduler（见 core/retention.py），
+不依赖本 scheduler 启用，确保数据保留始终运行。
 默认不自动启动全量扫描（scan_targets.enabled 默认 0）。
 """
 
@@ -20,7 +22,6 @@ from app.core.db import Database
 from app.scan.scan_runner import create_scan_task, run_scan_with_taskid
 from app.scan.result_correlator import correlate_scan_results
 from app.core.asset_model import check_lifecycle_transitions
-from app.core.retention import run_daily_cleanup
 from app.scan.cve_updater import update_from_nvd
 
 logger = logging.getLogger(__name__)
@@ -52,11 +53,6 @@ class ScanScheduler:
             check_lifecycle_transitions, CronTrigger(hour=3, minute=0),
             args=[self.db], id="lifecycle_check", replace_existing=True,
         )
-        # ── Retention：每日 02:00 ──
-        self.scheduler.add_job(
-            run_daily_cleanup, CronTrigger(hour=2, minute=0),
-            args=[self.db], id="retention_daily", replace_existing=True,
-        )
         # ── NVD 更新：每日 02:15 ──
         self.scheduler.add_job(
             update_from_nvd, CronTrigger(hour=2, minute=15),
@@ -64,7 +60,7 @@ class ScanScheduler:
         )
         self.scheduler.start()
         logger.info("ScanScheduler started (full=00-05/30min, incr=*/5min, "
-                    "cve=02:30, lifecycle=03:00, retention=02:00, nvd=02:15)")
+                    "cve=02:30, lifecycle=03:00, nvd=02:15)")
 
     def shutdown(self):
         self.scheduler.shutdown(wait=False)
